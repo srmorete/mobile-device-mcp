@@ -1,6 +1,6 @@
 {
   "name": "@srmorete/mobile-device-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "An MCP server to control iOS and Android devices — Native and WebView, multi-device",
   "license": "MIT",
   "repository": {
