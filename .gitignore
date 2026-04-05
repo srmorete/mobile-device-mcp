@@ -24,3 +24,4 @@ drivers/
 
 # OS
 .DS_Store
+bin/cli.js
