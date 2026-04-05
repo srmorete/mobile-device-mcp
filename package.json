@@ -1,6 +1,13 @@
 {
-  "name": "mobile-device-mcp",
+  "name": "@srmorete/mobile-device-mcp",
   "version": "0.1.0",
+  "description": "An MCP server to control iOS and Android devices — Native and WebView, multi-device",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/srmorete/mobile-device-mcp.git"
+  },
+  "keywords": ["mcp", "mobile", "ios", "android", "automation"],
   "type": "module",
   "bin": {
     "mobile-device-mcp": "./bin/cli.js"

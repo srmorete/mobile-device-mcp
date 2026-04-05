@@ -53,12 +53,12 @@ Both platforms automatically kill runaway scripts (infinite loops) and create a 
 ### Claude Code
 
 ```bash
-claude mcp add mobile-device-mcp -- npx -y mobile-device-mcp
+claude mcp add mobile-device-mcp -- npx -y @srmorete/mobile-device-mcp
 ```
 
 Or with custom ports:
 ```bash
-claude mcp add mobile-device-mcp -e MDMS_PORT_ANDROID=20000 -e MDMS_PORT_IOS=21000 -- npx -y mobile-device-mcp
+claude mcp add mobile-device-mcp -e MDMS_PORT_ANDROID=20000 -e MDMS_PORT_IOS=21000 -- npx -y @srmorete/mobile-device-mcp
 ```
 
 ### Modifying `.mcp.json` (Cursor, Claude Desktop, etc)
@@ -68,7 +68,7 @@ claude mcp add mobile-device-mcp -e MDMS_PORT_ANDROID=20000 -e MDMS_PORT_IOS=210
   "mcpServers": {
     "mobile-device-mcp": {
       "command": "npx",
-      "args": ["-y", "mobile-device-mcp"],
+      "args": ["-y", "@srmorete/mobile-device-mcp"],
       "env": {
         "MDMS_PORT_ANDROID": "18000",           # optional
         "MDMS_PORT_IOS": "19000"                # optional
