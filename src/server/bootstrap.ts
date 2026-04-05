@@ -24,7 +24,7 @@ const HEALTH_POLL_INTERVAL = 500;
 const HEALTH_TIMEOUT = 45_000;
 
 // Drivers root relative to project
-const PROJECT_ROOT = join(import.meta.dir, "..", "..");
+const PROJECT_ROOT = join(import.meta.dirname ?? import.meta.dir, "..", "..");
 const DRIVERS_ANDROID = join(PROJECT_ROOT, "drivers", "android");
 const DRIVERS_IOS_SIM = join(PROJECT_ROOT, "drivers", "ios");
 const DRIVERS_IOS_DEVICE = join(PROJECT_ROOT, "drivers", "ios-device");

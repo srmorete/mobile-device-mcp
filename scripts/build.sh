@@ -36,6 +36,15 @@ build_ios() {
   echo "    done."
 }
 
+bundle() {
+  echo "==> Bundling server for Node..."
+  cd "$ROOT"
+  bun build src/server/index.ts --target node --outfile bin/cli.js --quiet
+  printf '#!/usr/bin/env node\n%s' "$(cat bin/cli.js)" > bin/cli.js
+  chmod +x bin/cli.js
+  echo "    done."
+}
+
 pack() {
   echo "==> Packing tarball..."
   cd "$ROOT"
@@ -45,9 +54,9 @@ pack() {
 }
 
 case "$TARGET" in
-  android) build_android; pack ;;
-  ios)     build_ios; pack ;;
-  all)     build_android; build_ios; pack ;;
+  android) build_android; bundle; pack ;;
+  ios)     build_ios; bundle; pack ;;
+  all)     build_android; build_ios; bundle; pack ;;
   *)       usage ;;
 esac
 
