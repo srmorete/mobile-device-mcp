@@ -22,6 +22,9 @@ ios/*.xcworkspace/xcuserdata/
 # Drivers (built artifacts)
 drivers/
 
+# MCP registry tokens
+.mcpregistry_*
+
 # OS
 .DS_Store
 bin/cli.js
