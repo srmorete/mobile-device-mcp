@@ -1,0 +1,25 @@
+{
+  "name": "mobile-device-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "mobile-device-mcp": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "drivers/"
+  ],
+  "scripts": {
+    "start": "bun run src/server/index.ts",
+    "filter": "bun run src/filter/index.ts",
+    "test": "bun test",
+    "build": "./scripts/build.sh"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.9"
+  }
+}

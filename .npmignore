@@ -1,0 +1,11 @@
+node_modules/
+dist/
+bun.lockb
+*.tgz
+.DS_Store
+android/
+ios/
+spec/
+.mcp.json
+.claude/
+.github/

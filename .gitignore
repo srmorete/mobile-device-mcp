@@ -1,0 +1,26 @@
+node_modules/
+dist/
+bun.lockb
+*.tgz
+.mcp.json
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+
+# iOS
+ios/.build/
+ios/Logic/.build/
+ios/DerivedData/
+ios/*.xcodeproj/xcuserdata/
+ios/*.xcworkspace/xcuserdata/
+*.xctestrun
+
+# Drivers (built artifacts)
+drivers/
+
+# OS
+.DS_Store

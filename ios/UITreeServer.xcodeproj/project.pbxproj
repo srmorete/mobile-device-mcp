@@ -1,0 +1,419 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A100000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000001 /* AppDelegate.swift */; };
+		A100000010 /* UITreeServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000010 /* UITreeServer.swift */; };
+		A100000011 /* UITreeExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000011 /* UITreeExtractor.swift */; };
+		A100000012 /* Interactions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000012 /* Interactions.swift */; };
+		A100000013 /* JsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000013 /* JsEngine.swift */; };
+		A100000014 /* AppManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000014 /* AppManager.swift */; };
+		A100000015 /* ObjCExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = B100000016 /* ObjCExceptionCatcher.m */; };
+		A100000020 /* FlyingFox in Frameworks */ = {isa = PBXBuildFile; productRef = D100000001 /* FlyingFox */; };
+		A100000030 /* AtomicCounter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000030 /* AtomicCounter.swift */; };
+		A100000031 /* FrameUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000031 /* FrameUtils.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C100000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = P100000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = T100000001;
+			remoteInfo = UITreeServerApp;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		B100000001 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		B100000010 /* UITreeServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITreeServer.swift; sourceTree = "<group>"; };
+		B100000011 /* UITreeExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITreeExtractor.swift; sourceTree = "<group>"; };
+		B100000012 /* Interactions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Interactions.swift; sourceTree = "<group>"; };
+		B100000013 /* JsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JsEngine.swift; sourceTree = "<group>"; };
+		B100000014 /* AppManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppManager.swift; sourceTree = "<group>"; };
+		B100000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B100000015 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B100000016 /* ObjCExceptionCatcher.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ObjCExceptionCatcher.m; sourceTree = "<group>"; };
+		B100000017 /* ObjCExceptionCatcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ObjCExceptionCatcher.h; sourceTree = "<group>"; };
+		B100000018 /* UITreeServerUITests-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "UITreeServerUITests-Bridging-Header.h"; sourceTree = "<group>"; };
+		B100000030 /* AtomicCounter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AtomicCounter.swift; path = Logic/Sources/AtomicCounter.swift; sourceTree = "<group>"; };
+		B100000031 /* FrameUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FrameUtils.swift; path = Logic/Sources/FrameUtils.swift; sourceTree = "<group>"; };
+		E100000001 /* UITreeServerApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = UITreeServerApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E100000002 /* UITreeServerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = UITreeServerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		F100000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F100000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A100000020 /* FlyingFox in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		G100000001 /* = */ = {
+			isa = PBXGroup;
+			children = (
+				G100000002 /* App */,
+				G100000003 /* UITests */,
+				G100000005 /* Logic */,
+				G100000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		G100000005 /* Logic */ = {
+			isa = PBXGroup;
+			children = (
+				B100000030 /* AtomicCounter.swift */,
+				B100000031 /* FrameUtils.swift */,
+			);
+			name = Logic;
+			sourceTree = "<group>";
+		};
+		G100000002 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				B100000001 /* AppDelegate.swift */,
+				B100000002 /* Info.plist */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		G100000003 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				B100000010 /* UITreeServer.swift */,
+				B100000011 /* UITreeExtractor.swift */,
+				B100000012 /* Interactions.swift */,
+				B100000013 /* JsEngine.swift */,
+				B100000014 /* AppManager.swift */,
+				B100000016 /* ObjCExceptionCatcher.m */,
+				B100000017 /* ObjCExceptionCatcher.h */,
+				B100000018 /* UITreeServerUITests-Bridging-Header.h */,
+				B100000015 /* Info.plist */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		G100000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				E100000001 /* UITreeServerApp.app */,
+				E100000002 /* UITreeServerUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		T100000001 /* UITreeServerApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = X100000001 /* Build configuration list for PBXNativeTarget "UITreeServerApp" */;
+			buildPhases = (
+				S100000001 /* Sources */,
+				F100000001 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = UITreeServerApp;
+			productName = UITreeServerApp;
+			productReference = E100000001 /* UITreeServerApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		T100000002 /* UITreeServerUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = X100000002 /* Build configuration list for PBXNativeTarget "UITreeServerUITests" */;
+			buildPhases = (
+				S100000002 /* Sources */,
+				F100000002 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DEP100001 /* PBXTargetDependency */,
+			);
+			name = UITreeServerUITests;
+			packageProductDependencies = (
+				D100000001 /* FlyingFox */,
+			);
+			productName = UITreeServerUITests;
+			productReference = E100000002 /* UITreeServerUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		P100000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1540;
+				LastUpgradeCheck = 1540;
+				TargetAttributes = {
+					T100000001 = {
+						CreatedOnToolsVersion = 15.4;
+					};
+					T100000002 = {
+						CreatedOnToolsVersion = 15.4;
+						TestTargetID = T100000001;
+					};
+				};
+			};
+			buildConfigurationList = X100000003 /* Build configuration list for PBXProject "UITreeServer" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = G100000001;
+			packageReferences = (
+				R100000001 /* XCRemoteSwiftPackageReference "FlyingFox" */,
+			);
+			productRefGroup = G100000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				T100000001 /* UITreeServerApp */,
+				T100000002 /* UITreeServerUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		S100000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A100000001 /* AppDelegate.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		S100000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A100000010 /* UITreeServer.swift in Sources */,
+				A100000011 /* UITreeExtractor.swift in Sources */,
+				A100000012 /* Interactions.swift in Sources */,
+				A100000013 /* JsEngine.swift in Sources */,
+				A100000014 /* AppManager.swift in Sources */,
+				A100000015 /* ObjCExceptionCatcher.m in Sources */,
+				A100000030 /* AtomicCounter.swift in Sources */,
+				A100000031 /* FrameUtils.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		DEP100001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = T100000001 /* UITreeServerApp */;
+			targetProxy = C100000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		BC10000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		BC10000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		BC10000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.uitreeserver.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		BC10000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.uitreeserver.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		BC10000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = UITests/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.uitreeserver.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = "UITests/UITreeServerUITests-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = UITreeServerApp;
+			};
+			name = Debug;
+		};
+		BC10000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = UITests/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.uitreeserver.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = "UITests/UITreeServerUITests-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = UITreeServerApp;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		X100000003 /* Build configuration list for PBXProject "UITreeServer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BC10000001 /* Debug */,
+				BC10000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		X100000001 /* Build configuration list for PBXNativeTarget "UITreeServerApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BC10000003 /* Debug */,
+				BC10000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		X100000002 /* Build configuration list for PBXNativeTarget "UITreeServerUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BC10000005 /* Debug */,
+				BC10000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		R100000001 /* XCRemoteSwiftPackageReference "FlyingFox" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/swhitty/FlyingFox.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.16.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D100000001 /* FlyingFox */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = R100000001 /* XCRemoteSwiftPackageReference "FlyingFox" */;
+			productName = FlyingFox;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = P100000001 /* Project object */;
+}
