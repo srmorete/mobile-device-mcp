@@ -1,0 +1,35 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.srmorete/mobile-device-mcp",
+  "title": "Mobile Device MCP",
+  "description": "Control iOS and Android devices — tap, scroll, type, screenshots, UI trees, and sandboxed code execution. Supports multiple parallel devices with seamless Native/WebView mapping.",
+  "version": "0.1.2",
+  "repository": {
+    "url": "https://github.com/srmorete/mobile-device-mcp"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@srmorete/mobile-device-mcp",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "runtimeHint": "npx"
+    }
+  ],
+  "environmentVariables": [
+    {
+      "name": "MDMS_PORT_ANDROID",
+      "isRequired": false,
+      "isSecret": false,
+      "default": "18000"
+    },
+    {
+      "name": "MDMS_PORT_IOS",
+      "isRequired": false,
+      "isSecret": false,
+      "default": "19000"
+    }
+  ],
+  "transport": {
+    "type": "stdio"
+  }
+}
