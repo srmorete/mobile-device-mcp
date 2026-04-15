@@ -1,7 +1,7 @@
 {
   "name": "@srmorete/mobile-device-mcp",
   "mcpName": "io.github.srmorete/mobile-device-mcp",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "An MCP server to control iOS and Android devices — Native and WebView, multi-device",
   "license": "MIT",
   "repository": {
