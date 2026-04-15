@@ -1,8 +1,8 @@
 import { readdirSync } from "fs";
 import { join } from "path";
 import { randomBytes } from "crypto";
-import type { Subprocess } from "bun";
 import type { RegisteredDevice, DeviceType } from "./types.js";
+import { spawn, sleep, type Subproc } from "./proc.js";
 import {
   getDevice,
   setDevice,
@@ -80,13 +80,13 @@ async function bootstrapAndroid(deviceId: string): Promise<void> {
   const authToken = randomBytes(32).toString("hex");
   addPendingPort(port);
 
-  let serverProcess: Subprocess | undefined;
+  let serverProcess: Subproc | undefined;
   let cdpPort: number | undefined;
   try {
     // Install APKs
     const apks = readdirSync(DRIVERS_ANDROID).filter((f) => f.endsWith(".apk"));
     for (const apk of apks) {
-      const proc = Bun.spawn(["adb", "-s", deviceId, "install", "-r", "-g", join(DRIVERS_ANDROID, apk)], {
+      const proc = spawn(["adb", "-s", deviceId, "install", "-r", "-g", join(DRIVERS_ANDROID, apk)], {
         stdout: "pipe",
         stderr: "pipe",
       });
@@ -104,7 +104,7 @@ async function bootstrapAndroid(deviceId: string): Promise<void> {
     await runAdb(deviceId, "shell", `echo -n ${authToken} > /data/local/tmp/.mds_auth_${port}`);
 
     // Spawn instrumentation
-    serverProcess = Bun.spawn(
+    serverProcess = spawn(
       [
         "adb", "-s", deviceId, "shell", "am", "instrument", "-w", "-r",
         "-e", "class", "dev.uitreeserver.UITreeServer#startServer",
@@ -149,7 +149,7 @@ async function cleanupStaleAndroid(deviceId: string): Promise<void> {
   try { await runAdb(deviceId, "reverse", "--remove", "tcp:9222"); } catch { /* no reverse to remove */ }
   // Remove all stale adb forwards for this device
   try {
-    const proc = Bun.spawn(["adb", "-s", deviceId, "forward", "--list"], { stdout: "pipe", stderr: "pipe" });
+    const proc = spawn(["adb", "-s", deviceId, "forward", "--list"], { stdout: "pipe", stderr: "pipe" });
     const output = await new Response(proc.stdout).text();
     await proc.exited;
     for (const line of output.split("\n")) {
@@ -167,7 +167,7 @@ async function cleanupStaleAndroid(deviceId: string): Promise<void> {
 
 async function setupCdpForwarding(deviceId: string): Promise<number> {
   // Let ADB pick a free host port (tcp:0) that tunnels to Chrome's abstract socket
-  const fwdProc = Bun.spawn(
+  const fwdProc = spawn(
     ["adb", "-s", deviceId, "forward", "tcp:0", "localabstract:chrome_devtools_remote"],
     { stdout: "pipe", stderr: "pipe" },
   );
@@ -187,7 +187,7 @@ async function setupCdpForwarding(deviceId: string): Promise<number> {
 }
 
 async function runAdb(deviceId: string, ...args: string[]): Promise<void> {
-  const proc = Bun.spawn(["adb", "-s", deviceId, ...args], {
+  const proc = spawn(["adb", "-s", deviceId, ...args], {
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -204,8 +204,8 @@ async function bootstrapIOS(deviceId: string, deviceType: DeviceType): Promise<v
   const authToken = randomBytes(32).toString("hex");
   addPendingPort(port);
 
-  let serverProcess: Subprocess | undefined;
-  let tunnelProcess: Subprocess | undefined;
+  let serverProcess: Subproc | undefined;
+  let tunnelProcess: Subproc | undefined;
   try {
     if (deviceType === "simulator") {
       serverProcess = await bootstrapIOSSimulator(deviceId, port, authToken);
@@ -250,7 +250,7 @@ async function bootstrapIOS(deviceId: string, deviceType: DeviceType): Promise<v
 
 // ── iOS simulator: simctl install + spawn (bypasses xcodebuild orchestration) ──
 
-async function bootstrapIOSSimulator(deviceId: string, port: number, authToken: string): Promise<Subprocess> {
+async function bootstrapIOSSimulator(deviceId: string, port: number, authToken: string): Promise<Subproc> {
   const buildDir = join(DRIVERS_IOS_SIM, "Debug-iphonesimulator");
   const runnerApp = readdirSync(buildDir).find((f) => f.endsWith("-Runner.app"));
   if (!runnerApp) {
@@ -260,7 +260,7 @@ async function bootstrapIOSSimulator(deviceId: string, port: number, authToken: 
   const binaryName = runnerApp.replace(/\.app$/, "");
 
   // Read bundle ID from Info.plist
-  const plistProc = Bun.spawn(
+  const plistProc = spawn(
     ["/usr/libexec/PlistBuddy", "-c", "Print :CFBundleIdentifier", join(runnerAppPath, "Info.plist")],
     { stdout: "pipe", stderr: "pipe" },
   );
@@ -271,7 +271,7 @@ async function bootstrapIOSSimulator(deviceId: string, port: number, authToken: 
   }
 
   // Install the app on the simulator
-  const installProc = Bun.spawn(
+  const installProc = spawn(
     ["xcrun", "simctl", "install", deviceId, runnerAppPath],
     { stdout: "pipe", stderr: "pipe" },
   );
@@ -282,7 +282,7 @@ async function bootstrapIOSSimulator(deviceId: string, port: number, authToken: 
   }
 
   // Get installed app container path
-  const containerProc = Bun.spawn(
+  const containerProc = spawn(
     ["xcrun", "simctl", "get_app_container", deviceId, bundleId],
     { stdout: "pipe", stderr: "pipe" },
   );
@@ -293,7 +293,7 @@ async function bootstrapIOSSimulator(deviceId: string, port: number, authToken: 
   }
 
   // Spawn the runner binary inside the simulator (no foreground, no SpringBoard)
-  return Bun.spawn(
+  return spawn(
     ["xcrun", "simctl", "spawn", deviceId, join(containerPath, binaryName)],
     {
       stdout: "ignore",
@@ -311,13 +311,13 @@ async function bootstrapIOSSimulator(deviceId: string, port: number, authToken: 
 
 async function bootstrapIOSDevice(
   deviceId: string, port: number, authToken: string,
-): Promise<{ serverProcess: Subprocess; tunnelProcess: Subprocess }> {
+): Promise<{ serverProcess: Subproc; tunnelProcess: Subproc }> {
   const xctestrunFile = readdirSync(DRIVERS_IOS_DEVICE).find((f) => f.endsWith(".xctestrun"));
   if (!xctestrunFile) {
     throw new Error("No .xctestrun driver found for iOS device");
   }
 
-  const serverProcess = Bun.spawn(
+  const serverProcess = spawn(
     [
       "xcodebuild", "test-without-building",
       "-xctestrun", join(DRIVERS_IOS_DEVICE, xctestrunFile),
@@ -336,7 +336,7 @@ async function bootstrapIOSDevice(
     },
   );
 
-  const tunnelProcess = Bun.spawn(
+  const tunnelProcess = spawn(
     ["iproxy", String(port), String(port), "-u", deviceId, "-l", "127.0.0.1"],
     { stdout: "ignore", stderr: "ignore" },
   );
@@ -346,7 +346,7 @@ async function bootstrapIOSDevice(
 
 // ── Health poll ──
 
-async function healthPoll(port: number, serverProcess: Subprocess): Promise<void> {
+async function healthPoll(port: number, serverProcess: Subproc): Promise<void> {
   const deadline = Date.now() + HEALTH_TIMEOUT;
   while (Date.now() < deadline) {
     try {
@@ -359,7 +359,7 @@ async function healthPoll(port: number, serverProcess: Subprocess): Promise<void
     if (serverProcess.exitCode !== null) {
       throw new Error(`Server process exited with code ${serverProcess.exitCode} before becoming healthy`);
     }
-    await Bun.sleep(HEALTH_POLL_INTERVAL);
+    await sleep(HEALTH_POLL_INTERVAL);
   }
   // Timeout: kill and throw
   try { serverProcess.kill(9); } catch { /* */ }

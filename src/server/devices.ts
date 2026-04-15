@@ -3,6 +3,7 @@ import { join } from "path";
 import { homedir } from "os";
 import type { RegisteredDevice, DiscoveredDevice, Platform, DeviceType } from "./types.js";
 import { killPortListener } from "./ports.js";
+import { spawn } from "./proc.js";
 
 const LOCK_DIR = join(homedir(), ".mdms", "ports");
 
@@ -31,7 +32,7 @@ export function allDevices(): RegisteredDevice[] {
 // ── Discovery ──
 
 async function runCommand(cmd: string[]): Promise<string> {
-  const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+  const proc = spawn(cmd, { stdout: "pipe", stderr: "pipe" });
   const text = await new Response(proc.stdout).text();
   await proc.exited;
   return text;
@@ -199,21 +200,21 @@ export async function cleanupDevice(device: RegisteredDevice): Promise<void> {
   // Platform-specific cleanup
   if (device.platform === "android") {
     // Force-stop the test package
-    const forceStop = Bun.spawn(["adb", "-s", device.id, "shell", "am", "force-stop", "dev.uitreeserver.test"], {
+    const forceStop = spawn(["adb", "-s", device.id, "shell", "am", "force-stop", "dev.uitreeserver.test"], {
       stdout: "ignore",
       stderr: "ignore",
     });
     await forceStop.exited;
 
     // Remove auth token file from device
-    const rmAuth = Bun.spawn(
+    const rmAuth = spawn(
       ["adb", "-s", device.id, "shell", `rm -f /data/local/tmp/.mds_auth_${device.port}`],
       { stdout: "ignore", stderr: "ignore" },
     );
     await rmAuth.exited;
 
     // Remove CDP reverse (device:9222 → host)
-    const rmReverse = Bun.spawn(
+    const rmReverse = spawn(
       ["adb", "-s", device.id, "reverse", "--remove", "tcp:9222"],
       { stdout: "ignore", stderr: "ignore" },
     );
@@ -221,7 +222,7 @@ export async function cleanupDevice(device: RegisteredDevice): Promise<void> {
 
     // Remove ALL ADB forwards for this device (not just registered ports)
     try {
-      const listProc = Bun.spawn(["adb", "-s", device.id, "forward", "--list"], { stdout: "pipe", stderr: "ignore" });
+      const listProc = spawn(["adb", "-s", device.id, "forward", "--list"], { stdout: "pipe", stderr: "ignore" });
       const output = await new Response(listProc.stdout).text();
       await listProc.exited;
       const removes: Promise<number>[] = [];
@@ -231,7 +232,7 @@ export async function cleanupDevice(device: RegisteredDevice): Promise<void> {
         const match = line.match(/^\S+\s+(tcp:\d+)/);
         if (match) {
           removes.push(
-            Bun.spawn(["adb", "-s", device.id, "forward", "--remove", match[1]], {
+            spawn(["adb", "-s", device.id, "forward", "--remove", match[1]], {
               stdout: "ignore", stderr: "ignore",
             }).exited,
           );

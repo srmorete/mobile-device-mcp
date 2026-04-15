@@ -2,6 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileS
 import { join } from "path";
 import { homedir } from "os";
 import { allDevices } from "./devices.js";
+import { spawn } from "./proc.js";
 
 const BASE_PORT_IOS = parseInt(process.env.MDMS_PORT_IOS || "19000", 10);
 const BASE_PORT_ANDROID = parseInt(process.env.MDMS_PORT_ANDROID || "18000", 10);
@@ -31,7 +32,7 @@ function registryPorts(): Set<number> {
 async function getADBForwardedPorts(): Promise<Set<number>> {
   const ports = new Set<number>();
   try {
-    const proc = Bun.spawn(["adb", "forward", "--list"], { stdout: "pipe", stderr: "pipe" });
+    const proc = spawn(["adb", "forward", "--list"], { stdout: "pipe", stderr: "pipe" });
     const output = await new Response(proc.stdout).text();
     await proc.exited;
     // Lines: <serial> tcp:<hostPort> <deviceSpec>
@@ -64,7 +65,7 @@ export async function allocateAndroidPort(): Promise<number> {
 
 async function isPortListening(port: number): Promise<boolean> {
   try {
-    const proc = Bun.spawn(["lsof", "-i", `TCP:${port}`, "-sTCP:LISTEN"], {
+    const proc = spawn(["lsof", "-i", `TCP:${port}`, "-sTCP:LISTEN"], {
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -142,7 +143,7 @@ export async function allocateIOSPort(): Promise<number> {
 
 export async function killPortListener(port: number): Promise<void> {
   try {
-    const proc = Bun.spawn(
+    const proc = spawn(
       ["lsof", "-ti", `TCP:${port}`, "-sTCP:LISTEN"],
       { stdout: "pipe", stderr: "pipe" },
     );

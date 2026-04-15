@@ -1,4 +1,4 @@
-import type { Subprocess } from "bun";
+import type { Subproc } from "./proc.js";
 
 export type Platform = "android" | "ios";
 export type DeviceType = "simulator" | "device";
@@ -17,6 +17,6 @@ export interface RegisteredDevice {
   deviceType?: DeviceType;
   port: number;
   authToken: string;
-  serverProcess: Subprocess;
-  tunnelProcess?: Subprocess; // iOS real devices only
+  serverProcess: Subproc;
+  tunnelProcess?: Subproc; // iOS real devices only
 }
