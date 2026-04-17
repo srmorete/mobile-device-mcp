@@ -108,52 +108,6 @@ class UITreeUtilsTest {
         assertEquals(1, augmented[0].children[0].children.size)
     }
 
-    // --- scaleBounds / scaleNodes ---
-
-    @Test
-    fun `scaleBounds identity scale unchanged`() {
-        val b = Bounds(10, 20, 90, 80)
-        assertEquals(b, UITreeUtils.scaleBounds(b, 1.0f))
-    }
-
-    @Test
-    fun `scaleBounds scales down`() {
-        val b = Bounds(100, 200, 300, 400)
-        val scaled = UITreeUtils.scaleBounds(b, 0.5f)
-        assertEquals(Bounds(50, 100, 150, 200), scaled)
-    }
-
-    @Test
-    fun `scaleBounds rounds correctly`() {
-        val b = Bounds(10, 10, 11, 11)
-        val scaled = UITreeUtils.scaleBounds(b, 0.667f)
-        assertEquals(Bounds(7, 7, 7, 7), scaled)
-    }
-
-    @Test
-    fun `scaleNodes scales bounds and recurses`() {
-        val child = node(bounds = Bounds(50, 50, 100, 100))
-        val parent = node(bounds = Bounds(0, 0, 200, 200), children = listOf(child))
-        val scaled = UITreeUtils.scaleNodes(listOf(parent), 0.5f)
-        assertEquals(Bounds(0, 0, 100, 100), scaled[0].bounds)
-        assertEquals(Bounds(25, 25, 50, 50), scaled[0].children[0].bounds)
-    }
-
-    @Test
-    fun `scaleNodes preserves null bounds`() {
-        val n = node(bounds = null)
-        val scaled = UITreeUtils.scaleNodes(listOf(n), 0.5f)
-        assertNull(scaled[0].bounds)
-    }
-
-    @Test
-    fun `scaleNodes preserves other fields`() {
-        val n = node(className = "android.widget.Button", resourceId = "com.app:id/btn")
-        val scaled = UITreeUtils.scaleNodes(listOf(n), 0.5f)
-        assertEquals("android.widget.Button", scaled[0].className)
-        assertEquals("com.app:id/btn", scaled[0].resourceId)
-    }
-
     // --- findNodeByResourceId ---
 
     @Test

@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(UITreeLogic)
+import UITreeLogic
+#endif
 
 enum InteractionError: LocalizedError {
     case textInputUnavailable
@@ -21,10 +24,13 @@ final class Interactions {
         self.extractor = extractor
     }
 
+    /// Converts render-space input to a native XCUICoordinate (single seam).
     private func coord(x: Double, y: Double) -> XCUICoordinate {
-        springboard.coordinate(
+        let nx = extractor.coord.toNative(x)
+        let ny = extractor.coord.toNative(y)
+        return springboard.coordinate(
             withNormalizedOffset: CGVector(dx: 0, dy: 0)
-        ).withOffset(CGVector(dx: x, dy: y))
+        ).withOffset(CGVector(dx: nx, dy: ny))
     }
 
     func tap(x: Double, y: Double) {

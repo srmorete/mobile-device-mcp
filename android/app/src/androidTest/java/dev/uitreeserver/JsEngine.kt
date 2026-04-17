@@ -21,7 +21,7 @@ import org.mozilla.javascript.WrapFactory
  * - Until: Condition builder
  * - console.log(): Output captured in response logs array
  */
-class JsEngine(private val device: UiDevice) {
+class JsEngine(private val device: UiDevice, private val coord: Coord) {
 
     companion object {
         // ContextFactory that enforces instruction-count timeout
@@ -85,17 +85,26 @@ class JsEngine(private val device: UiDevice) {
             val uiDeviceWrapper = context.newObject(scope)
             val wrapperScope = uiDeviceWrapper as ScriptableObject
 
-            // Screen info
-            val getWidthFn = simpleFunc { device.displayWidth }
-            val getHeightFn = simpleFunc { device.displayHeight }
+            // Screen info — reported in render space to match HTTP handlers.
+            val getWidthFn = simpleFunc { coord.toRenderInt(device.displayWidth) }
+            val getHeightFn = simpleFunc { coord.toRenderInt(device.displayHeight) }
             val getRotationFn = simpleFunc { device.displayRotation }
             ScriptableObject.putProperty(wrapperScope, "displayWidth", getWidthFn)
             ScriptableObject.putProperty(wrapperScope, "displayHeight", getHeightFn)
             ScriptableObject.putProperty(wrapperScope, "displayRotation", getRotationFn)
 
-            // Interactions
-            val clickFn = twoArgFunc { x, y -> device.click(x, y) }
-            val swipeFn = fiveArgFunc { sx, sy, ex, ey, steps -> device.swipe(sx, sy, ex, ey, steps) }
+            // Interactions — inputs in render space (Float to preserve sub-pixel precision
+            // from JS numbers), converted to native before dispatch.
+            val clickFn = coordFn2 { x, y ->
+                device.click(coord.toNativeInt(x), coord.toNativeInt(y))
+            }
+            val swipeFn = coordFn4WithSteps { sx, sy, ex, ey, steps ->
+                device.swipe(
+                    coord.toNativeInt(sx), coord.toNativeInt(sy),
+                    coord.toNativeInt(ex), coord.toNativeInt(ey),
+                    steps
+                )
+            }
             val pressKeyCodeFn = simpleFunc1Int { keyCode -> device.pressKeyCode(keyCode) }
             val pressBackFn = simpleFunc { device.pressBack() }
             val pressHomeFn = simpleFunc { device.pressHome() }
@@ -201,23 +210,25 @@ class JsEngine(private val device: UiDevice) {
         }
     }
 
-    private fun twoArgFunc(block: (Int, Int) -> Any?): org.mozilla.javascript.BaseFunction {
+    /** Two render-space coordinate args as Float (preserves sub-pixel precision). */
+    private fun coordFn2(block: (Float, Float) -> Any?): org.mozilla.javascript.BaseFunction {
         return object : org.mozilla.javascript.BaseFunction() {
             override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<out Any?>): Any? {
-                val a = (args.getOrNull(0) as? Number)?.toInt() ?: return Context.getUndefinedValue()
-                val b = (args.getOrNull(1) as? Number)?.toInt() ?: return Context.getUndefinedValue()
+                val a = (args.getOrNull(0) as? Number)?.toFloat() ?: return Context.getUndefinedValue()
+                val b = (args.getOrNull(1) as? Number)?.toFloat() ?: return Context.getUndefinedValue()
                 return Context.javaToJS(block(a, b), scope)
             }
         }
     }
 
-    private fun fiveArgFunc(block: (Int, Int, Int, Int, Int) -> Any?): org.mozilla.javascript.BaseFunction {
+    /** Four render-space coordinates (Float) plus an Int step count. */
+    private fun coordFn4WithSteps(block: (Float, Float, Float, Float, Int) -> Any?): org.mozilla.javascript.BaseFunction {
         return object : org.mozilla.javascript.BaseFunction() {
             override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<out Any?>): Any? {
-                val a = (args.getOrNull(0) as? Number)?.toInt() ?: return Context.getUndefinedValue()
-                val b = (args.getOrNull(1) as? Number)?.toInt() ?: return Context.getUndefinedValue()
-                val c = (args.getOrNull(2) as? Number)?.toInt() ?: return Context.getUndefinedValue()
-                val d = (args.getOrNull(3) as? Number)?.toInt() ?: return Context.getUndefinedValue()
+                val a = (args.getOrNull(0) as? Number)?.toFloat() ?: return Context.getUndefinedValue()
+                val b = (args.getOrNull(1) as? Number)?.toFloat() ?: return Context.getUndefinedValue()
+                val c = (args.getOrNull(2) as? Number)?.toFloat() ?: return Context.getUndefinedValue()
+                val d = (args.getOrNull(3) as? Number)?.toFloat() ?: return Context.getUndefinedValue()
                 val e = (args.getOrNull(4) as? Number)?.toInt() ?: return Context.getUndefinedValue()
                 return Context.javaToJS(block(a, b, c, d, e), scope)
             }

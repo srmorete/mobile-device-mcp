@@ -50,22 +50,6 @@ object UITreeUtils {
         }
     }
 
-    fun scaleBounds(bounds: Bounds, scale: Float): Bounds = Bounds(
-        left = Math.round(bounds.left * scale),
-        top = Math.round(bounds.top * scale),
-        right = Math.round(bounds.right * scale),
-        bottom = Math.round(bounds.bottom * scale)
-    )
-
-    fun scaleNodes(nodes: List<UITreeNode>, scale: Float): List<UITreeNode> {
-        return nodes.map { node ->
-            node.copy(
-                bounds = node.bounds?.let { scaleBounds(it, scale) },
-                children = scaleNodes(node.children, scale)
-            )
-        }
-    }
-
     fun findNodeByResourceId(nodes: List<UITreeNode>, resourceId: String): UITreeNode? {
         for (node in nodes) {
             if (node.resourceId == resourceId) return node

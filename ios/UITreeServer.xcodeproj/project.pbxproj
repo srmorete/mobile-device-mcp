@@ -17,6 +17,7 @@
 		A100000020 /* FlyingFox in Frameworks */ = {isa = PBXBuildFile; productRef = D100000001 /* FlyingFox */; };
 		A100000030 /* AtomicCounter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000030 /* AtomicCounter.swift */; };
 		A100000031 /* FrameUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000031 /* FrameUtils.swift */; };
+		A100000032 /* Coord.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000032 /* Coord.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -43,6 +44,7 @@
 		B100000018 /* UITreeServerUITests-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "UITreeServerUITests-Bridging-Header.h"; sourceTree = "<group>"; };
 		B100000030 /* AtomicCounter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AtomicCounter.swift; path = Logic/Sources/AtomicCounter.swift; sourceTree = "<group>"; };
 		B100000031 /* FrameUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FrameUtils.swift; path = Logic/Sources/FrameUtils.swift; sourceTree = "<group>"; };
+		B100000032 /* Coord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Coord.swift; path = Logic/Sources/Coord.swift; sourceTree = "<group>"; };
 		E100000001 /* UITreeServerApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = UITreeServerApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E100000002 /* UITreeServerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = UITreeServerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -81,6 +83,7 @@
 			children = (
 				B100000030 /* AtomicCounter.swift */,
 				B100000031 /* FrameUtils.swift */,
+				B100000032 /* Coord.swift */,
 			);
 			name = Logic;
 			sourceTree = "<group>";
@@ -220,6 +223,7 @@
 				A100000015 /* ObjCExceptionCatcher.m in Sources */,
 				A100000030 /* AtomicCounter.swift in Sources */,
 				A100000031 /* FrameUtils.swift in Sources */,
+				A100000032 /* Coord.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

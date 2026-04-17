@@ -18,6 +18,7 @@ export interface SpawnOptions {
   stdout?: StdioOption;
   stderr?: StdioOption;
   env?: Record<string, string | undefined>;
+  cwd?: string;
 }
 
 export interface Subproc {
@@ -50,6 +51,7 @@ function nodeAdapter(cmd: string[], options: SpawnOptions): Subproc {
       options.stderr === "ignore" ? "ignore" : "pipe",
     ],
     env: options.env as NodeJS.ProcessEnv | undefined,
+    cwd: options.cwd,
   });
 
   let exitCode: number | null = null;
