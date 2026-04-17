@@ -12,7 +12,21 @@ The system provides mobile device automation (iOS and Android) through a three-l
 
 3. **MCP server** — The external interface. Exposes 14 tools via the Model Context Protocol. Handles device discovery, bootstrapping, port allocation, and request proxying to on-device servers.
 
-All coordinates use screen-space values. Android uses pixels. iOS uses logical points (1x scale).
+All coordinates use a single unified system called **render space**, derived at server startup from the device's native dimensions. Every on-device endpoint (screenshot pixels, UI tree bounds, tap/scroll inputs, /exec bindings) speaks render space; conversion to the platform-native coordinate system happens inside the server at the edge where it talks to the OS automation API.
+
+**Render scale rule** (per-server, fixed for the server's lifetime):
+
+```
+renderScale = 1500 / max(nativeWidth, nativeHeight)   // if both dims > 0
+renderScale = 1.0                                      // otherwise (identity)
+```
+
+- `max()` makes the scale rotation-invariant — a single value remains valid after device rotation.
+- Larger devices downscale (1080×2400 → 0.625), smaller devices upscale (iPhone SE points 375×667 → 2.249; iPhone Pro Max points 430×932 → 1.609).
+- iOS upscales from logical points but the source screenshot is captured at native pixel density (3× on retina), so the renderer super-samples from a sharper original.
+- 1500 keeps the longer side below 1568 (model vision resize threshold) and 2000 (many-image cap).
+
+Every platform exposes a single `Coord` module that owns `renderScale`, `toRender`, `toNative`, and scale-a-bounds helpers. HTTP handlers and /exec bindings share the same seam — raw OS-automation calls with unconverted coordinates are a bug.
 
 ---
 
@@ -131,7 +145,7 @@ Note: iOS only supports `home`. The MCP tool accepts all values; the on-device s
 |-----------|------|----------|
 | device_id | string | yes |
 
-GETs on-device `/screenshot`. Returns the response as base64-encoded image content. The MIME type is detected from the response bytes: JPEG (magic bytes `FF D8`) → `image/jpeg`, otherwise `image/png`.
+GETs on-device `/screenshot`. Returns the response as base64-encoded image content with MIME type `image/jpeg`. Both platforms emit JPEG in render-space dimensions.
 
 #### 2.2.9 uitree
 
@@ -296,7 +310,15 @@ On startup, configures the UI automation framework with minimal timeouts (0ms fo
 
 ### 3.2 Coordinate System
 
-All coordinates are in device pixels (physical pixels on the display). This applies to UI tree bounds, screenshot dimensions, and tap/scroll coordinates.
+All coordinates are in **render space** (see Section 1). `renderScale` is computed once at server startup from `device.displayWidth` / `device.displayHeight`:
+
+```
+renderScale = 1500 / max(displayWidth, displayHeight)
+```
+
+`max()` makes the value rotation-invariant, so a single scale is valid for the server's lifetime even when the device rotates. The chosen scale is logged at startup.
+
+UI tree bounds, reported screen dimensions, screenshot pixels, and tap/scroll/longPress inputs are all in render space. Conversion to native pixels happens at the HTTP handler edge and inside the /exec uiDevice wrapper; raw UIAutomator calls sit behind the `Coord` seam.
 
 ### 3.3 Endpoints
 
@@ -379,17 +401,15 @@ Fields `text`, `id`, `name`, `aria-label`, `data-testid`, `value`, `type` are om
 
 #### GET /screenshot
 
-Returns a JPEG image at quality 50.
+Returns a JPEG image in render space at quality 75. Pixel dimensions equal `(toRender(displayWidth), toRender(displayHeight))` — i.e. a screenshot pixel at `(x, y)` corresponds to the same screen location as a hierarchy bound at `(x, y)`.
 
-Content-Type: `image/jpeg`. Coordinate system: device pixels.
-
-The MCP server detects the actual image format from the response bytes (JPEG magic bytes `FF D8` → `image/jpeg`, otherwise `image/png`) and labels accordingly.
+Content-Type: `image/jpeg`.
 
 #### POST /tap
 
-**Query parameters:** `x` (integer, required), `y` (integer, required)
+**Query parameters:** `x` (number, required), `y` (number, required)
 
-Taps at the given pixel coordinates. Returns `OK` (200) or error (400 for missing params, 500 if tap fails).
+Taps at the given render-space coordinates. The handler converts to native pixels via `Coord.toNativeInt` before calling UIAutomator. Returns `OK` (200) or error (400 for missing params, 500 if tap fails).
 
 #### POST /doubleTap
 
@@ -490,7 +510,7 @@ Returns 400 on execution error.
 - Interaction: `click(x, y)`, `swipe(startX, startY, endX, endY, steps)`, `drag(startX, startY, endX, endY, steps)`
 - Finding: `findObject(selector)`, `findObjects(selector)`, `wait(condition, timeout)`, `hasObject(selector)`
 - Hardware: `pressBack()`, `pressHome()`, `pressKeyCode(keyCode)`, `pressKeyCode(keyCode, metaState)`, `pressRecentApps()`
-- Display: `getDisplayWidth()`, `getDisplayHeight()`, `getDisplaySizeDp()`
+- Display: `displayWidth`, `displayHeight` (both in render space — match HTTP handlers), `displayRotation`
 - State: `getCurrentPackageName()`, `wakeUp()`, `sleep()`, `isScreenOn()`
 - Notifications: `openNotification()`, `openQuickSettings()`
 - Waiting: `waitForIdle()`, `waitForIdle(timeout)`, `waitForWindowUpdate(packageName, timeout)`
@@ -604,7 +624,15 @@ Runs as an XCTest entry point. Port configured via `PORT` environment variable (
 
 ### 4.2 Coordinate System
 
-All coordinates are in logical points (1x scale, not retina pixels). For a 3x device (e.g., 1290x2796 physical pixels), the coordinate space is 430x932 points. UI tree frames, screenshot dimensions, and tap coordinates all use this same logical point system.
+All coordinates are in **render space** (see Section 1). `renderScale` is computed once at server startup by snapshotting Springboard and reading the root frame — XCTest's `UIScreen` API reports `320×480` regardless of device, so a real snapshot is the only reliable source. Formula:
+
+```
+renderScale = 1500 / max(nativePointWidth, nativePointHeight)
+```
+
+iOS native dimensions are in logical points (1× scale). Because these are always below 1500 on current devices, this always upscales: iPhone SE (375×667 pt) → scale ≈ 2.249; iPhone 15 Pro Max (430×932 pt) → scale ≈ 1.609. The source screenshot capture is at native pixel density (e.g. 3× on Pro Max), so the renderer super-samples from a sharper original when rendering to render-space pixels — visually a *downscale from raw pixels* on retina devices, net byte-efficient.
+
+UI tree frames, reported screen dimensions, screenshot pixels, and tap/scroll/longPress inputs are all in render space. Conversion to native points happens in the single `Coord` seam shared by HTTP handlers and /exec bindings. (The /exec surface is element-query based and takes no raw x/y.)
 
 ### 4.3 Endpoints
 
@@ -682,17 +710,17 @@ Uses the accessibility snapshot API to get a dictionary representation of the el
 
 #### GET /screenshot
 
-Returns a PNG image at 1x scale (logical points).
+Returns a JPEG image in render space at quality 0.75.
 
-Content-Type: `image/png`.
+Content-Type: `image/jpeg`.
 
-The raw screenshot is captured at the device's native pixel scale (e.g., 3x for iPhone Pro models). It is then re-rendered at scale factor 1.0 so that screenshot pixel coordinates match UI tree frame coordinates exactly.
+The raw screenshot is captured at the device's native pixel scale (e.g. 3× on Pro Max). It is re-rendered into a bitmap of size `(toRender(points.width), toRender(points.height))` so that screenshot pixel coordinates match UI tree frame coordinates exactly. The renderer super-samples from the native pixel source when downscaling from retina, and interpolates when upscaling from points on smaller devices.
 
 #### POST /tap
 
 **Query parameters:** `x` (double, required), `y` (double, required)
 
-Taps at the given logical point coordinates. Uses the home screen app's coordinate space with a normalized offset from (0, 0) at top-left.
+Taps at the given render-space coordinates. The handler converts to native logical points via `Coord.toNative` before constructing an `XCUICoordinate` in Springboard's coordinate space.
 
 #### POST /doubleTap
 
@@ -1084,14 +1112,16 @@ Typical usage: `curl -s localhost:8080/uitree | npm run filter`
 
 ## Appendix A: Coordinate System Summary
 
+Every endpoint on both platforms speaks **render space**. The platform's native coordinate system (Android device pixels, iOS logical points) is an internal implementation detail, confined to the `Coord` seam.
+
 | | Android | iOS |
 |---|---------|-----|
-| UI tree coordinates | Pixels | Logical points |
-| Screenshot coordinates | Pixels | Logical points (1x scale) |
-| Tap/scroll input | Pixels | Logical points |
-| UI tree ↔ Screenshot | 1:1 match | 1:1 match |
-
-Both platforms provide consistent coordinate systems within themselves: UI tree coordinates, screenshot pixel coordinates, and interaction coordinates all use the same space.
+| Native source | Device pixels | Logical points (1× scale) |
+| `renderScale` source | `device.displayWidth/Height` at startup | Springboard snapshot frame at startup |
+| `renderScale` rule | `1500 / max(nativeW, nativeH)` | `1500 / max(nativeW, nativeH)` |
+| Rotation-invariant? | Yes (via `max`) | Yes (via `max`) |
+| Screenshot format | JPEG q=75, render-space pixels | JPEG q=0.75, render-space pixels |
+| UI tree ↔ Screenshot ↔ Tap | 1:1 in render space | 1:1 in render space |
 
 ## Appendix B: Platform Differences Summary
 
@@ -1101,7 +1131,7 @@ Both platforms provide consistent coordinate systems within themselves: UI tree 
 | /uitree params | `?webview=true\|false` | None |
 | /uitree response | Has `rotation` field | No `rotation` field |
 | /uitree node format | `className` + `bounds` | `elementType` + `frame` |
-| /screenshot format | JPEG (quality 50) | PNG (1x scale) |
+| /screenshot format | JPEG quality 75, render-space dims | JPEG quality 0.75, render-space dims |
 | /press buttons | 10 buttons | Only `home` |
 | /launchApp param | `packageName` | `bundleId` |
 | /terminateApp param | `packageName` | `bundleId` |

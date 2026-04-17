@@ -21,7 +21,7 @@ enum UITreeError: LocalizedError {
         case .snapshotFailed:
             return "Failed to capture app snapshot"
         case .screenshotEncodingFailed:
-            return "Failed to encode screenshot as PNG"
+            return "Failed to encode screenshot"
         }
     }
 }
@@ -29,13 +29,41 @@ enum UITreeError: LocalizedError {
 final class UITreeExtractor {
 
     private let springboardHandle: AppHandle
+    /// Single source of coordinate scaling — computed once from Springboard's frame
+    /// because XCTest's UIScreen reports 320x480 regardless of the actual device.
+    let coord: Coord
 
     init() {
-        springboardHandle = DispatchQueue.main.sync {
-            let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-
-            return AppHandle(app: sb, bundleId: "com.apple.springboard")
+        let sbHandle = Self.onMain {
+            AppHandle(
+                app: XCUIApplication(bundleIdentifier: "com.apple.springboard"),
+                bundleId: "com.apple.springboard"
+            )
         }
+        self.springboardHandle = sbHandle
+        self.coord = Self.computeInitialCoord(springboard: sbHandle.app)
+        NSLog("[UITreeServer] renderScale=\(coord.renderScale) target=\(Coord.TARGET_LONG_EDGE)")
+    }
+
+    /// Run on the main thread, safe whether the caller is already on main or not —
+    /// `DispatchQueue.main.sync` from main would deadlock.
+    private static func onMain<T>(_ work: () -> T) -> T {
+        Thread.isMainThread ? work() : DispatchQueue.main.sync(execute: work)
+    }
+
+    private static func computeInitialCoord(springboard: XCUIApplication) -> Coord {
+        var result = Coord(renderScale: 1.0)
+        onMain {
+            var snapshot: XCUIElementSnapshot? = nil
+            try? ObjCExceptionCatcher.catchException {
+                snapshot = try? springboard.snapshot()
+            }
+            if let snap = snapshot, let frameValue = snap.dictionaryRepresentation[.frame] {
+                let frame = FrameUtils.extractFrame(from: frameValue)
+                result = Coord.compute(nativeW: frame.width, nativeH: frame.height)
+            }
+        }
+        return result
     }
 
     // MARK: - Foreground App Detection
@@ -107,12 +135,12 @@ final class UITreeExtractor {
             let rootNode = buildNode(from: dict)
             nodes.append(rootNode)
 
-            // Screen dimensions from first root node's frame.
-            // Per spec: NOT from screen API (reports 320x480).
+            // Screen dimensions from first root node's frame (NOT screen API — reports 320x480).
+            // Reported in render space to match all other endpoints.
             if let frameValue = dict[.frame] {
                 let frame = FrameUtils.extractFrame(from: frameValue)
-                screenWidth = frame.width
-                screenHeight = frame.height
+                screenWidth = coord.toRender(frame.width)
+                screenHeight = coord.toRender(frame.height)
             }
 
             // Always include status bar elements from Springboard
@@ -208,14 +236,14 @@ final class UITreeExtractor {
         let elementTypeRaw = (dict[.elementType] as? UInt) ?? 0
         node["elementType"] = elementTypeRaw
 
-        // Frame
+        // Frame — emitted in render space (single seam: Coord).
         if let frameValue = dict[.frame] {
             let frame = FrameUtils.extractFrame(from: frameValue)
             node["frame"] = [
-                "x": frame.x,
-                "y": frame.y,
-                "width": frame.width,
-                "height": frame.height,
+                "x": coord.toRender(frame.x),
+                "y": coord.toRender(frame.y),
+                "width": coord.toRender(frame.width),
+                "height": coord.toRender(frame.height),
             ]
         } else {
             node["frame"] = [
@@ -244,21 +272,27 @@ final class UITreeExtractor {
 
     func captureScreenshot() throws -> Data {
         return try DispatchQueue.main.sync {
-            let handle = foregroundApp()
-            let screenshot = handle.app.screenshot()
+            // XCUIScreen captures the display compositor output. XCUIApplication.screenshot()
+            // returned stale cached renders on Springboard, causing screenshot/uitree drift.
+            let screenshot = XCUIScreen.main.screenshot()
             let fullImage = screenshot.image
 
-            // Re-render at 1x scale so pixel coords match UI tree frame coords.
-            // The raw screenshot is captured at native pixel scale (e.g. 3x).
-            let size = fullImage.size  // Already in points
+            // Render into render-space pixels. Source is at native pixel density (e.g. 3x
+            // on Pro Max), so UIKit super-samples from the sharper original when downscaling
+            // and interpolates cleanly when upscaling from points.
+            let nativeSize = fullImage.size  // logical points
+            let targetSize = CGSize(
+                width: CGFloat(coord.toRender(Double(nativeSize.width)).rounded()),
+                height: CGFloat(coord.toRender(Double(nativeSize.height)).rounded())
+            )
             let format = UIGraphicsImageRendererFormat()
-            format.scale = 1.0
-            let renderer = UIGraphicsImageRenderer(size: size, format: format)
-            let image1x = renderer.image { _ in
-                fullImage.draw(in: CGRect(origin: .zero, size: size))
+            format.scale = 1.0  // output pixels = targetSize × 1.0
+            let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+            let rendered = renderer.image { _ in
+                fullImage.draw(in: CGRect(origin: .zero, size: targetSize))
             }
 
-            guard let jpegData = image1x.jpegData(compressionQuality: 0.80) else {
+            guard let jpegData = rendered.jpegData(compressionQuality: 0.75) else {
                 throw UITreeError.screenshotEncodingFailed
             }
             return jpegData

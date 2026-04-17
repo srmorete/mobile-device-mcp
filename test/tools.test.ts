@@ -127,7 +127,7 @@ const UITREE_RESPONSE = {
 // --- Tests ---
 
 describe("screenshot", () => {
-  test("detects JPEG from magic bytes", async () => {
+  test("returns image/jpeg", async () => {
     serverResponses["/screenshot"] = {
       body: new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]),
       binary: true,
@@ -135,15 +135,6 @@ describe("screenshot", () => {
     const result = await callTool("screenshot", { device_id: DEVICE_ID });
     expect(result.content[0].type).toBe("image");
     expect(result.content[0].mimeType).toBe("image/jpeg");
-  });
-
-  test("detects PNG from magic bytes", async () => {
-    serverResponses["/screenshot"] = {
-      body: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]),
-      binary: true,
-    };
-    const result = await callTool("screenshot", { device_id: DEVICE_ID });
-    expect(result.content[0].mimeType).toBe("image/png");
   });
 
   test("returns error for empty screenshot", async () => {

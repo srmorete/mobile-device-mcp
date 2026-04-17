@@ -1,4 +1,5 @@
-import { readdirSync } from "fs";
+import { existsSync, readdirSync, statSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import { randomBytes } from "crypto";
 import type { RegisteredDevice, DeviceType } from "./types.js";
@@ -23,8 +24,17 @@ import {
 const HEALTH_POLL_INTERVAL = 500;
 const HEALTH_TIMEOUT = 45_000;
 
-// Drivers root relative to project
-const PROJECT_ROOT = join(import.meta.dirname ?? import.meta.dir, "..", "..");
+// Source form (src/server/) is two levels above drivers/; bundled form (bin/) is one.
+function resolveProjectRoot(moduleDir: string): string {
+  for (const up of ["..", join("..", "..")]) {
+    const root = join(moduleDir, up);
+    const drivers = join(root, "drivers");
+    if (existsSync(drivers) && statSync(drivers).isDirectory()) return root;
+  }
+  throw new Error(`drivers/ not found relative to ${moduleDir}`);
+}
+
+const PROJECT_ROOT = resolveProjectRoot(import.meta.dirname ?? import.meta.dir);
 const DRIVERS_ANDROID = join(PROJECT_ROOT, "drivers", "android");
 const DRIVERS_IOS_SIM = join(PROJECT_ROOT, "drivers", "ios");
 const DRIVERS_IOS_DEVICE = join(PROJECT_ROOT, "drivers", "ios-device");
@@ -326,6 +336,9 @@ async function bootstrapIOSDevice(
       "-allowProvisioningUpdates",
     ],
     {
+      // xcodebuild writes Logs/Test artifacts to cwd; don't pollute whatever dir
+      // Claude Code was launched from.
+      cwd: tmpdir(),
       stdout: "ignore",
       stderr: "ignore",
       env: {

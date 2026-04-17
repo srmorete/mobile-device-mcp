@@ -174,10 +174,7 @@ export function registerTools(server: McpServer): void {
         if (buf.length === 0) {
           return errorResult("Empty screenshot response from device");
         }
-        const base64 = buf.toString("base64");
-        // Detect actual image format from magic bytes
-        const mimeType = (buf[0] === 0xFF && buf[1] === 0xD8) ? "image/jpeg" : "image/png";
-        return imageResult(base64, mimeType);
+        return imageResult(buf.toString("base64"), "image/jpeg");
       } catch (err) {
         return errorResult((err as Error).message);
       }

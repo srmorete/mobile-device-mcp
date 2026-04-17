@@ -30,18 +30,6 @@ import java.util.concurrent.CountDownLatch
 class UITreeServer {
 
     private val gson: Gson = GsonBuilder().serializeNulls().create()
-    @Volatile private var screenshotScale = 1.0f
-
-    /** Compute combined scale from UIAutomator native pixels to final screenshot pixels. */
-    private fun computeScreenshotScale(
-        bitmapW: Int, bitmapH: Int, displayW: Int, displayH: Int
-    ): Float {
-        if (displayW <= 0 || displayH <= 0) return 1.0f
-        val baseScale = bitmapW.toFloat() / displayW.toFloat()
-        val longEdge = maxOf(bitmapW, bitmapH)
-        val capScale = if (longEdge > 1568) 1568f / longEdge.toFloat() else 1f
-        return baseScale * capScale
-    }
 
     @Test
     fun startServer() {
@@ -66,22 +54,16 @@ class UITreeServer {
         configurator.actionAcknowledgmentTimeout = 0
 
         val device = UiDevice.getInstance(instrumentation)
+        val coord = Coord.compute(device.displayWidth, device.displayHeight)
+        android.util.Log.i(
+            "UITreeServer",
+            "renderScale=${coord.renderScale} native=${device.displayWidth}x${device.displayHeight} target=${Coord.TARGET_LONG_EDGE}"
+        )
         val extractor = UITreeExtractor(device)
         val interactions = Interactions(device, instrumentation)
         val cdpClient = CdpClient()
         val webViewExtractor = WebViewExtractor(cdpClient)
-        val jsEngine = JsEngine(device)
-
-        // Calibrate coordinate scale: screenshot pixels vs UIAutomator native pixels.
-        // takeScreenshot() may return a different resolution than device.displayWidth/Height.
-        val calBitmap = instrumentation.uiAutomation.takeScreenshot()
-        if (calBitmap != null) {
-            screenshotScale = computeScreenshotScale(
-                calBitmap.width, calBitmap.height,
-                device.displayWidth, device.displayHeight
-            )
-            calBitmap.recycle()
-        }
+        val jsEngine = JsEngine(device, coord)
 
         val server = embeddedServer(CIO, port = port, host = "127.0.0.1") {
             // Security: reject requests with non-localhost Host header (DNS rebinding defense)
@@ -141,10 +123,10 @@ class UITreeServer {
                         }
                     }
 
-                    // Scale coordinates to match screenshot pixel space
-                    val scaledNodes = UITreeUtils.scaleNodes(nodes, screenshotScale)
-                    val scaledW = Math.round(treeResponse.screenWidth * screenshotScale)
-                    val scaledH = Math.round(treeResponse.screenHeight * screenshotScale)
+                    // Scale to render space (single seam: Coord)
+                    val scaledNodes = coord.scaleNodes(nodes)
+                    val scaledW = coord.toRenderInt(treeResponse.screenWidth)
+                    val scaledH = coord.toRenderInt(treeResponse.screenHeight)
 
                     val response = JsonObject().apply {
                         addProperty("rotation", treeResponse.rotation)
@@ -157,38 +139,31 @@ class UITreeServer {
                 }
 
 
-                // GET /screenshot
+                // GET /screenshot — pixel dims match render space exactly.
                 get("/screenshot") {
                     val bitmap = instrumentation.uiAutomation.takeScreenshot()
                     if (bitmap == null) {
                         call.respond(HttpStatusCode.InternalServerError, "Failed to take screenshot")
                         return@get
                     }
-                    // Recompute scale on each screenshot (handles rotation changes)
-                    screenshotScale = computeScreenshotScale(
-                        bitmap.width, bitmap.height,
-                        device.displayWidth, device.displayHeight
-                    )
-                    // Cap long edge to 1568 to avoid LLM API auto-scaling
-                    val maxEdge = 1568
-                    val longEdge = maxOf(bitmap.width, bitmap.height)
-                    val outputBitmap = if (longEdge > maxEdge) {
-                        val capScale = maxEdge.toFloat() / longEdge.toFloat()
-                        val newW = Math.round(bitmap.width * capScale)
-                        val newH = Math.round(bitmap.height * capScale)
-                        val scaled = Bitmap.createScaledBitmap(bitmap, newW, newH, true)
+                    // Render-space dims come from display (not bitmap) so a screenshot pixel
+                    // at (x, y) corresponds to the same screen location as a hierarchy bound at (x, y).
+                    val renderW = coord.toRenderInt(device.displayWidth)
+                    val renderH = coord.toRenderInt(device.displayHeight)
+                    val output = if (renderW == bitmap.width && renderH == bitmap.height) {
+                        bitmap
+                    } else {
+                        val scaled = Bitmap.createScaledBitmap(bitmap, renderW, renderH, true)
                         bitmap.recycle()
                         scaled
-                    } else {
-                        bitmap
                     }
                     val stream = ByteArrayOutputStream()
-                    outputBitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
-                    outputBitmap.recycle()
+                    output.compress(Bitmap.CompressFormat.JPEG, 75, stream)
+                    output.recycle()
                     call.respondBytes(stream.toByteArray(), ContentType.Image.JPEG)
                 }
 
-                // POST /tap
+                // POST /tap — render coords in, native dispatched via Coord.
                 post("/tap") {
                     val x = call.request.queryParameters["x"]?.toFloatOrNull()
                     val y = call.request.queryParameters["y"]?.toFloatOrNull()
@@ -196,9 +171,7 @@ class UITreeServer {
                         call.respond(HttpStatusCode.BadRequest, "Missing required parameters: x, y")
                         return@post
                     }
-                    val nativeX = Math.round(x / screenshotScale)
-                    val nativeY = Math.round(y / screenshotScale)
-                    val success = interactions.tap(nativeX, nativeY)
+                    val success = interactions.tap(coord.toNativeInt(x), coord.toNativeInt(y))
                     if (success) {
                         call.respondText("OK")
                     } else {
@@ -214,9 +187,7 @@ class UITreeServer {
                         call.respond(HttpStatusCode.BadRequest, "Missing required parameters: x, y")
                         return@post
                     }
-                    val nativeX = Math.round(x / screenshotScale)
-                    val nativeY = Math.round(y / screenshotScale)
-                    interactions.doubleTap(nativeX, nativeY)
+                    interactions.doubleTap(coord.toNativeInt(x), coord.toNativeInt(y))
                     call.respondText("OK")
                 }
 
@@ -228,10 +199,8 @@ class UITreeServer {
                         call.respond(HttpStatusCode.BadRequest, "Missing required parameters: x, y")
                         return@post
                     }
-                    val nativeX = Math.round(x / screenshotScale)
-                    val nativeY = Math.round(y / screenshotScale)
                     val duration = call.request.queryParameters["duration"]?.toIntOrNull() ?: 500
-                    interactions.longPress(nativeX, nativeY, duration)
+                    interactions.longPress(coord.toNativeInt(x), coord.toNativeInt(y), duration)
                     call.respondText("OK")
                 }
 
@@ -246,10 +215,10 @@ class UITreeServer {
                         return@post
                     }
                     interactions.scroll(
-                        Math.round(startX / screenshotScale),
-                        Math.round(startY / screenshotScale),
-                        Math.round(endX / screenshotScale),
-                        Math.round(endY / screenshotScale)
+                        coord.toNativeInt(startX),
+                        coord.toNativeInt(startY),
+                        coord.toNativeInt(endX),
+                        coord.toNativeInt(endY)
                     )
                     call.respondText("OK")
                 }
