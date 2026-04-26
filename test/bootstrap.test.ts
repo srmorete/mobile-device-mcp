@@ -315,7 +315,7 @@ describe("bootstrapAndroid", () => {
     });
     sleepSpy = spyOn(Bun, "sleep").mockImplementation(() => Promise.resolve());
 
-    await expect(ensureDevice("cdp-fail")).rejects.toThrow("Failed to allocate CDP forward port");
+    await expect(ensureDevice("cdp-fail")).rejects.toThrow("adb forward returned non-numeric stdout");
   });
 
   test("cleans up CDP forward when reverse fails", async () => {

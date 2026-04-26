@@ -181,10 +181,17 @@ async function setupCdpForwarding(deviceId: string): Promise<number> {
     ["adb", "-s", deviceId, "forward", "tcp:0", "localabstract:chrome_devtools_remote"],
     { stdout: "pipe", stderr: "pipe" },
   );
-  const cdpPort = parseInt((await new Response(fwdProc.stdout).text()).trim(), 10);
-  await fwdProc.exited;
+  const [stdout, stderr] = await Promise.all([
+    new Response(fwdProc.stdout).text(),
+    new Response(fwdProc.stderr).text(),
+  ]);
+  const exitCode = await fwdProc.exited;
+  if (exitCode !== 0) {
+    throw new Error(`adb forward (exit ${exitCode}): ${stderr}`);
+  }
+  const cdpPort = parseInt(stdout, 10);
   if (isNaN(cdpPort)) {
-    throw new Error("Failed to allocate CDP forward port");
+    throw new Error(`adb forward returned non-numeric stdout (stdout=${JSON.stringify(stdout)}, stderr=${JSON.stringify(stderr)})`);
   }
   // Reverse: device:9222 → host:cdpPort (so on-device CdpClient reaches Chrome)
   try {
