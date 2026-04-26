@@ -26,8 +26,8 @@ export function registerTools(server: McpServer): void {
     "Lists available mobile devices",
     {},
     async () => {
-      const devices = await discoverDevices();
-      return textResult(JSON.stringify(devices, null, 2));
+      const result = await discoverDevices();
+      return textResult(JSON.stringify(result, null, 2));
     },
   );
 

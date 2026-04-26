@@ -27,6 +27,10 @@ export interface Subproc {
   readonly exited: Promise<number>;
   readonly stdout: ReadableStream<Uint8Array> | null;
   readonly stderr: ReadableStream<Uint8Array> | null;
+  // Node-only: set when child_process.spawn fires 'error' (ENOENT, EACCES, …).
+  // Bun.spawn throws synchronously on those cases, so this stays undefined
+  // under Bun.
+  readonly spawnError?: Error;
   kill(signal?: number | NodeJS.Signals): void;
 }
 
@@ -42,7 +46,7 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function nodeAdapter(cmd: string[], options: SpawnOptions): Subproc {
+export function nodeAdapter(cmd: string[], options: SpawnOptions = {}): Subproc {
   const [command, ...args] = cmd;
   const child = nodeSpawn(command, args, {
     stdio: [
@@ -55,12 +59,14 @@ function nodeAdapter(cmd: string[], options: SpawnOptions): Subproc {
   });
 
   let exitCode: number | null = null;
+  let spawnError: Error | undefined;
   const exited = new Promise<number>((resolve) => {
     child.on("exit", (code, signal) => {
       exitCode = code ?? (signal ? 128 : 1);
       resolve(exitCode);
     });
-    child.on("error", () => {
+    child.on("error", (err) => {
+      spawnError = err;
       if (exitCode === null) exitCode = 1;
       resolve(exitCode);
     });
@@ -73,6 +79,7 @@ function nodeAdapter(cmd: string[], options: SpawnOptions): Subproc {
     get pid() { return child.pid; },
     get exitCode() { return exitCode; },
     get exited() { return exited; },
+    get spawnError() { return spawnError; },
     get stdout() {
       if (stdoutWeb === undefined) {
         stdoutWeb = child.stdout ? (Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>) : null;
@@ -86,7 +93,7 @@ function nodeAdapter(cmd: string[], options: SpawnOptions): Subproc {
       return stderrWeb;
     },
     kill(signal?: number | NodeJS.Signals) {
-      child.kill(signal as NodeJS.Signals);
+      child.kill(signal);
     },
   };
 }

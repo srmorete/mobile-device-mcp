@@ -246,21 +246,28 @@ describe("run_code", () => {
 });
 
 describe("list_devices", () => {
-  test("returns valid JSON array", async () => {
-    const spawn = spyOn(Bun, "spawn").mockImplementation(() => ({
-      stdout: new Response("").body,
-      stderr: new Response("").body,
-      exited: Promise.resolve(0),
-      exitCode: 0,
-      pid: 1,
-      kill: () => {},
-    } as any));
-    const consoleSpy = spyOn(console, "error").mockImplementation(() => {});
+  test("returns devices and errors fields", async () => {
+    const spawn = spyOn(Bun, "spawn").mockImplementation((cmd: any) => {
+      const args = (cmd as string[]).join(" ");
+      // Return valid empty JSON for simctl/devicectl so they don't error on parse
+      const stdout = args.includes("simctl") || args.includes("devicectl")
+        ? JSON.stringify({ devices: {}, result: { devices: [] } })
+        : "List of devices attached\n";
+      return {
+        stdout: new Response(stdout).body,
+        stderr: new Response("").body,
+        exited: Promise.resolve(0),
+        exitCode: 0,
+        pid: 1,
+        kill: () => {},
+      } as any;
+    });
     const result = await callTool("list_devices", {});
     const parsed = JSON.parse(result.content[0].text);
-    expect(Array.isArray(parsed)).toBe(true);
+    expect(Array.isArray(parsed.devices)).toBe(true);
+    expect(Array.isArray(parsed.errors)).toBe(true);
+    expect(parsed.errors).toEqual([]);
     spawn.mockRestore();
-    consoleSpy.mockRestore();
   });
 });
 

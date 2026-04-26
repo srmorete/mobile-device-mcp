@@ -124,7 +124,7 @@ describe("discoverDevices", () => {
       return mockSubprocess("");
     });
 
-    const devices = await discoverDevices();
+    const { devices } = await discoverDevices();
 
     const android = devices.find((d) => d.id === "emulator-5554");
     expect(android).toBeDefined();
@@ -139,20 +139,46 @@ describe("discoverDevices", () => {
     const real = devices.find((d) => d.id === "DEV-001");
     expect(real).toBeDefined();
     expect(real!.deviceType).toBe("device");
-    expect(devices.find((d) => d.id === "DEV-002")).toBeUndefined(); // network
+    expect(real!.state).toBe("wired");
+    const network = devices.find((d) => d.id === "DEV-002");
+    expect(network).toBeDefined();
+    expect(network!.state).toBe("network");
 
     spawn.mockRestore();
   });
 
-  test("returns empty when all discovery fails", async () => {
+  test("surfaces errors when all discovery fails", async () => {
     const spawn = spyOn(Bun, "spawn").mockImplementation(() => {
       throw new Error("command not found");
     });
-    const consoleSpy = spyOn(console, "error").mockImplementation(() => {});
-    const devices = await discoverDevices();
+    const { devices, errors } = await discoverDevices();
     expect(devices).toEqual([]);
+    expect(errors).toHaveLength(3);
+    expect(errors.map((e) => e.platform).sort()).toEqual(["android", "ios-device", "ios-simulator"]);
+    expect(errors.every((e) => e.message.includes("command not found"))).toBe(true);
     spawn.mockRestore();
-    consoleSpy.mockRestore();
+  });
+
+  test("surfaces async spawn errors (Node ENOENT path)", async () => {
+    // Simulates the Node child_process.spawn failure mode where spawn returns
+    // a Subproc that exits non-zero with `spawnError` set, instead of throwing
+    // synchronously. This is the case d4rkmen hit when adb wasn't on PATH.
+    const spawn = spyOn(Bun, "spawn").mockImplementation((cmd: any) => ({
+      stdout: new Response("").body,
+      stderr: new Response("").body,
+      exited: Promise.resolve(1),
+      exitCode: 1,
+      spawnError: new Error(`spawn ${(cmd as string[])[0]} ENOENT`),
+      pid: undefined,
+      kill: mock(() => {}),
+    }) as any);
+    const { devices, errors } = await discoverDevices();
+    expect(devices).toEqual([]);
+    expect(errors).toHaveLength(3);
+    expect(errors.find((e) => e.platform === "android")!.message).toBe("spawn adb ENOENT");
+    expect(errors.find((e) => e.platform === "ios-simulator")!.message).toBe("spawn xcrun ENOENT");
+    expect(errors.find((e) => e.platform === "ios-device")!.message).toBe("spawn xcrun ENOENT");
+    spawn.mockRestore();
   });
 
   test("android device without model uses serial as name", async () => {
@@ -163,7 +189,7 @@ describe("discoverDevices", () => {
       }
       return mockSubprocess("{}");
     });
-    const devices = await discoverDevices();
+    const { devices } = await discoverDevices();
     const d = devices.find((d) => d.id === "192.168.1.5:5555");
     expect(d).toBeDefined();
     expect(d!.name).toBe("192.168.1.5:5555");
@@ -190,7 +216,7 @@ describe("discoverDevices", () => {
       }
       return mockSubprocess("");
     });
-    const devices = await discoverDevices();
+    const { devices } = await discoverDevices();
     const d = devices.find((d) => d.id === "NO-NAME");
     expect(d).toBeDefined();
     expect(d!.name).toBe("NO-NAME");
