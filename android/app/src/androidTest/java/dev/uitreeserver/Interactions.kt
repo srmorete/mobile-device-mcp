@@ -29,37 +29,60 @@ class Interactions(private val device: UiDevice, private val instrumentation: In
         device.swipe(startX, startY, endX, endY, 10)
     }
 
-    fun type(text: String): Boolean {
+    fun type(text: String): Pair<Boolean, String?> {
+        var focused = findFocusedEditableNode()
+            ?: return Pair(false, "No focused element found")
+
+        // Web inputs (Chrome/WebView) silently drop ACTION_SET_TEXT when the field only has
+        // visual focus from an injected touch — the renderer never got real editable focus
+        // (symptom: soft keyboard doesn't open). ACTION_CLICK on the node activates it
+        // through the accessibility pathway, which grants renderer focus.
+        // On native fields this click is harmless (cursor reposition).
+        // Never click non-editable nodes: that could activate buttons/links.
+        if (focused.isEditable) {
+            val clicked = focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            val className = focused.className
+            focused.recycle()
+            if (!clicked) {
+                android.util.Log.i("Interactions", "type: ACTION_CLICK returned false on $className")
+            }
+            // The node may be stale after the click; re-fetch before SET_TEXT.
+            focused = findFocusedEditableNode()
+                ?: return Pair(false, "Focused element lost after focus click")
+        }
+
+        val args = android.os.Bundle()
+        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        val className = focused.className
+        val applied = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        android.util.Log.i("Interactions", "type: target=$className editable=${focused.isEditable} setText=$applied")
+        focused.recycle()
+        if (!applied) {
+            android.util.Log.w("Interactions", "type: ACTION_SET_TEXT rejected by $className")
+            return Pair(false, "Focused element ($className) rejected text input")
+        }
+        return Pair(true, null)
+    }
+
+    private fun findFocusedEditableNode(): AccessibilityNodeInfo? {
         val root = try {
-            val uiAutomation = instrumentation.uiAutomation
-            uiAutomation.rootInActiveWindow
+            instrumentation.uiAutomation.rootInActiveWindow
         } catch (_: Exception) {
             null
-        } ?: return false
-
+        } ?: return null
         val focused = findFocusedNode(root)
-        if (focused == null) {
-            root.recycle()
-            return false
-        }
-
-        try {
-            val args = android.os.Bundle()
-            args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-            focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        } finally {
-            focused.recycle()
-            root.recycle()
-        }
-        return true
+        root.recycle()
+        return focused
     }
 
     private fun findFocusedNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        // Prefer input focus (the editable field) over accessibility focus (the container)
-        val inputFocused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        if (inputFocused != null) return inputFocused
-        // Fallback: walk tree for any focused + editable node
-        return findEditableFocused(root)
+        // Prefer a node that is both focused and editable (matches By.focused(true)
+        // semantics used elsewhere). findFocus(FOCUS_INPUT) can return a non-editable
+        // container in Chrome/WebViews after a11y actions, and SET_TEXT on it is
+        // silently dropped while still returning true.
+        findEditableFocused(root)?.let { return it }
+        // Fallback: input focus reported by the view system
+        return root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
     }
 
     private fun findEditableFocused(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
