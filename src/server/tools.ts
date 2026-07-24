@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { statSync } from "fs";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { discoverDevices, getDevice } from "./devices.js";
+import { discoverDevices, detectPlatform, getDevice, runCommand } from "./devices.js";
 import { proxyGet, proxyGetBinary, proxyPost, proxyPostBody } from "./proxy.js";
 import { ensureDevice } from "./bootstrap.js";
 import { filterUITree } from "../filter/filter.js";
@@ -273,6 +274,56 @@ export function registerTools(server: McpServer): void {
       try {
         const text = await proxyGet(device_id, "/listApps");
         return textResult(text);
+      } catch (err) {
+        return errorResult((err as Error).message);
+      }
+    },
+  );
+
+  // ── 2.2.14 install_app ──
+  // Host-tooling operation: installs straight through adb/simctl/devicectl,
+  // exactly like bootstrap installs our own driver. Does NOT require the
+  // on-device server, so no ensureDevice/bootstrap here.
+  server.tool(
+    "install_app",
+    "Installs an app on the device from a file on the host: .apk for Android, .app bundle for iOS simulator, .app or .ipa for iOS real device. Replaces existing installs.",
+    {
+      device_id: z.string().regex(/^[\w\-.:]{1,256}$/),
+      app_path: z.string().min(1).max(4096),
+    },
+    async ({ device_id, app_path }) => {
+      try {
+        const { platform, deviceType } = await detectPlatform(device_id);
+
+        // Validate the artifact before invoking host tooling. No shell is
+        // involved (spawn arrays), so path characters need no escaping.
+        const stat = statSync(app_path, { throwIfNoEntry: false });
+        if (!stat) {
+          return errorResult(`No such file on the host: ${app_path}`);
+        }
+
+        let output: string;
+        if (platform === "android") {
+          if (!app_path.endsWith(".apk") || !stat.isFile()) {
+            return errorResult(`Android installs require an .apk file, got: ${app_path}`);
+          }
+          output = await runCommand(["adb", "-s", device_id, "install", "-r", app_path]);
+        } else if (deviceType === "simulator") {
+          if (!app_path.endsWith(".app") || !stat.isDirectory()) {
+            return errorResult(`iOS simulator installs require a .app bundle directory, got: ${app_path}`);
+          }
+          output = await runCommand(["xcrun", "simctl", "install", device_id, app_path]);
+        } else {
+          if (!/\.(app|ipa)$/.test(app_path)) {
+            return errorResult(`iOS device installs require a .app bundle or .ipa file, got: ${app_path}`);
+          }
+          output = await runCommand([
+            "xcrun", "devicectl", "device", "install", "app", "--device", device_id, app_path,
+          ]);
+        }
+
+        const trimmed = output.trim();
+        return textResult(trimmed || `Installed ${app_path} on ${device_id}`);
       } catch (err) {
         return errorResult((err as Error).message);
       }
