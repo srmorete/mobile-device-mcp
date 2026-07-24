@@ -230,11 +230,11 @@ class UITreeServer {
                         call.respond(HttpStatusCode.BadRequest, "Missing required parameter: text")
                         return@post
                     }
-                    val success = interactions.type(text)
+                    val (success, error) = interactions.type(text)
                     if (success) {
                         call.respondText("OK")
                     } else {
-                        call.respond(HttpStatusCode.BadRequest, "No focused element found")
+                        call.respond(HttpStatusCode.BadRequest, error ?: "Type failed")
                     }
                 }
 

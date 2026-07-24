@@ -202,9 +202,24 @@ GETs on-device `/listApps`. Returns the JSON array as text content.
 
 POSTs the code string as plain-text body (Content-Type: `text/plain`) to on-device `/exec`. Returns the JSON response as text content.
 
+#### 2.2.14 install_app
+
+| Parameter | Type | Required |
+|-----------|------|----------|
+| device_id | string | yes |
+| app_path | string | yes |
+
+Installs an app from a file on the host. Pure host-tooling operation — does NOT use the on-device server or the proxy wrapper (no bootstrap triggered):
+
+- **Android:** `adb -s {device_id} install -r {app_path}` — requires an `.apk` file
+- **iOS simulator:** `xcrun simctl install {device_id} {app_path}` — requires a `.app` bundle directory
+- **iOS real device:** `xcrun devicectl device install app --device {device_id} {app_path}` — requires `.app` or `.ipa`
+
+The artifact is validated (exists, right extension, file vs directory) before invoking host tooling. Returns the installer stdout on success.
+
 ### 2.3 Request Proxying
 
-All tool calls (except `list_devices`) are routed through a retry wrapper:
+All tool calls (except `list_devices` and `install_app`) are routed through a retry wrapper:
 
 1. Ensure the device is bootstrapped (see 2.4)
 2. Execute the HTTP request to `http://127.0.0.1:{port}{path}` with `Authorization: Bearer {authToken}` header (the per-device token generated during bootstrap)

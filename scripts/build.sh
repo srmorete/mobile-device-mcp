@@ -49,7 +49,7 @@ pack() {
   echo "==> Packing tarball..."
   cd "$ROOT"
   npm pack --quiet 2>/dev/null
-  TARBALL=$(ls -t mobile-device-mcp-*.tgz | head -1)
+  TARBALL=$(ls -t *mobile-device-mcp-*.tgz | head -1)
   echo "    $TARBALL"
 }
 

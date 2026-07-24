@@ -28,6 +28,7 @@ Devices are bootstrapped on first use — the server installs the driver app, al
 | `launch_app` | Launch an app by bundle ID / package name |
 | `terminate_app` | Force-stop an app |
 | `list_apps` | List installed apps |
+| `install_app` | Install an app from a host-local file (`.apk` for Android, `.app` for iOS simulator, `.app`/`.ipa` for iOS device). Replaces existing installs |
 | `run_code` | Execute sandboxed JavaScript on-device (see [run_code](#run_code) below) |
 
 ### run_code

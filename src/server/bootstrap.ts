@@ -21,6 +21,11 @@ import {
   killPortListener,
 } from "./ports.js";
 
+// Adaptive health-poll schedule (issue #6): driver servers often come up in
+// ~50ms, so probe aggressively at first, then settle into 500ms to avoid
+// hammering a slow device. The fixed 500ms interval used to add a ~500ms
+// floor to every cold bootstrap.
+const HEALTH_POLL_SCHEDULE = [25, 50, 100, 200];
 const HEALTH_POLL_INTERVAL = 500;
 const HEALTH_TIMEOUT = 45_000;
 
@@ -368,6 +373,7 @@ async function bootstrapIOSDevice(
 
 async function healthPoll(port: number, serverProcess: Subproc): Promise<void> {
   const deadline = Date.now() + HEALTH_TIMEOUT;
+  let attempt = 0;
   while (Date.now() < deadline) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/health`);
@@ -379,7 +385,9 @@ async function healthPoll(port: number, serverProcess: Subproc): Promise<void> {
     if (serverProcess.exitCode !== null) {
       throw new Error(`Server process exited with code ${serverProcess.exitCode} before becoming healthy`);
     }
-    await sleep(HEALTH_POLL_INTERVAL);
+    const delay = HEALTH_POLL_SCHEDULE[attempt] ?? HEALTH_POLL_INTERVAL;
+    attempt++;
+    await sleep(delay);
   }
   // Timeout: kill and throw
   try { serverProcess.kill(9); } catch { /* */ }

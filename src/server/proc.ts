@@ -49,6 +49,11 @@ export function sleep(ms: number): Promise<void> {
 export function nodeAdapter(cmd: string[], options: SpawnOptions = {}): Subproc {
   const [command, ...args] = cmd;
   const child = nodeSpawn(command, args, {
+    // Make the child its own process-group leader so cleanup can reap the whole
+    // tree via process.kill(-pid) (issue #4). Without this, grandchildren of
+    // xcodebuild / iproxy / adb-instrumentation orphan on cleanup under Node.
+    // NOTE: deliberately no child.unref() — the parent must keep waiting on it.
+    detached: true,
     stdio: [
       "ignore",
       options.stdout === "ignore" ? "ignore" : "pipe",

@@ -31,7 +31,7 @@ export function allDevices(): RegisteredDevice[] {
 
 // ── Discovery ──
 
-async function runCommand(cmd: string[]): Promise<string> {
+export async function runCommand(cmd: string[]): Promise<string> {
   const proc = spawn(cmd, { stdout: "pipe", stderr: "pipe" });
   // Drain stdio in parallel with exit; sequential awaits deadlock once the OS
   // pipe buffer (~64KB) fills (e.g. devicectl JSON, `adb forward --list`).
