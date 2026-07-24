@@ -1,5 +1,6 @@
 import XCTest
 import CoreGraphics
+import ImageIO
 import UIKit
 #if canImport(UITreeLogic)
 import UITreeLogic
@@ -275,27 +276,47 @@ final class UITreeExtractor {
             // XCUIScreen captures the display compositor output. XCUIApplication.screenshot()
             // returned stale cached renders on Springboard, causing screenshot/uitree drift.
             let screenshot = XCUIScreen.main.screenshot()
-            let fullImage = screenshot.image
 
-            // Render into render-space pixels. Source is at native pixel density (e.g. 3x
-            // on Pro Max), so UIKit super-samples from the sharper original when downscaling
-            // and interpolates cleanly when upscaling from points.
-            let nativeSize = fullImage.size  // logical points
-            let targetSize = CGSize(
-                width: CGFloat(coord.toRender(Double(nativeSize.width)).rounded()),
-                height: CGFloat(coord.toRender(Double(nativeSize.height)).rounded())
-            )
-            let format = UIGraphicsImageRendererFormat()
-            format.scale = 1.0  // output pixels = targetSize × 1.0
-            let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
-            let rendered = renderer.image { _ in
-                fullImage.draw(in: CGRect(origin: .zero, size: targetSize))
-            }
+            // Render-space long edge in pixels. Aspect ratio is identical between logical
+            // points and native pixels, so scaling the pixel dims to this bound lands on the
+            // same target size as scaling point dims (within 1px rounding).
+            let nativeSize = screenshot.image.size  // logical points
+            let targetLongEdge = max(
+                coord.toRender(Double(nativeSize.width)),
+                coord.toRender(Double(nativeSize.height))
+            ).rounded()
 
-            guard let jpegData = rendered.jpegData(compressionQuality: 0.75) else {
+            // Full ImageIO pipeline: decode -> purpose-built thumbnail downscaler -> JPEG
+            // encode. CGImageSourceCreateThumbnailAtIndex is ~2-3x faster than the old
+            // UIGraphicsImageRenderer + draw(in:) CGContext round-trip (issue #5).
+            let pngData = screenshot.pngRepresentation
+            guard let source = CGImageSourceCreateWithData(pngData as CFData, nil) else {
                 throw UITreeError.screenshotEncodingFailed
             }
-            return jpegData
+
+            let thumbOptions: [CFString: Any] = [
+                // Decode from the original, never from a cached/incorrect thumbnail.
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: targetLongEdge,
+            ]
+            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary) else {
+                throw UITreeError.screenshotEncodingFailed
+            }
+
+            let jpegData = NSMutableData()
+            guard let destination = CGImageDestinationCreateWithData(
+                jpegData, "public.jpeg" as CFString, 1, nil
+            ) else {
+                throw UITreeError.screenshotEncodingFailed
+            }
+            CGImageDestinationAddImage(destination, thumbnail, [
+                kCGImageDestinationLossyCompressionQuality: 0.75,
+            ] as CFDictionary)
+            guard CGImageDestinationFinalize(destination) else {
+                throw UITreeError.screenshotEncodingFailed
+            }
+            return jpegData as Data
         }
     }
 }
