@@ -40,10 +40,15 @@ final class AppManager {
 
     /// First-hit-only log so we can see which waits the bypass actually
     /// suppresses without flooding the log on a busy app.
+    /// Swizzled IMPs fire on arbitrary XCTest threads — the Set must be
+    /// locked (same pattern as AtomicCounter / JsEngine.lastForeground).
     private static var suppressedLogged = Set<String>()
+    private static let suppressedLoggedLock = NSLock()
     static func logSuppressed(_ selName: String) {
-        if !suppressedLogged.contains(selName) {
-            suppressedLogged.insert(selName)
+        suppressedLoggedLock.lock()
+        let isNew = suppressedLogged.insert(selName).inserted
+        suppressedLoggedLock.unlock()
+        if isNew {
             diag("quiescence bypass suppressed: \(selName)")
         }
     }

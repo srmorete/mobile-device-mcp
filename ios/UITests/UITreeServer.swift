@@ -16,6 +16,10 @@ final class UITreeServer: XCTestCase {
         // page) blocks in quiescence waits for 60s+ on a cold AX channel, which
         // outlives the host's 30s request timeout and wedges the first calls of
         // every session. JsEngine's own increment/decrement still composes.
+        // Note: this does NOT change run_code semantics — exec already wrapped
+        // every script in increment/decrement, so _waitForExistence/_waitForHittable
+        // short-circuited during scripts all along. What changes: native tool
+        // calls (tap, uitree, ...) also skip those waits now.
         AppManager.skipQuiescence.increment()
         let extractor = UITreeExtractor()
         let interactions = Interactions(extractor: extractor)

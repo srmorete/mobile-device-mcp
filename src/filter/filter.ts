@@ -19,6 +19,7 @@ const IOS_ELEMENT_TYPE_MAP: Record<number, string> = {
   33: "slider", // XCUIElementTypeSlider
   38: "picker", // XCUIElementTypePicker
   40: "switch", // XCUIElementTypeSwitch
+  41: "switch", // XCUIElementTypeToggle
   42: "link", // XCUIElementTypeLink
   43: "image", // XCUIElementTypeImage
   45: "input", // XCUIElementTypeSearchField
@@ -127,7 +128,10 @@ function isIOSFormat(nodes: unknown[]): boolean {
 // --- 5.2 iOS Normalization ---
 
 const IOS_INPUT_TYPES = new Set(["input"]);
-const IOS_CLICKABLE_TYPES = new Set(["button", "link", "input"]);
+// Interactive control types — without these, a labeled switch/checkbox was
+// reported clickable:false and an unlabeled one was dropped from the tree
+// entirely (code review follow-up to issue #12).
+const IOS_CLICKABLE_TYPES = new Set(["button", "link", "input", "switch", "checkbox", "slider", "picker"]);
 
 function normalizeIOSNode(node: IOSNode): AndroidNode {
   const unifiedType = IOS_ELEMENT_TYPE_MAP[node.elementType] ?? "other";
@@ -415,6 +419,15 @@ export function filterUITree(input: RawUITree, options: FilterOptions = {}): Fil
   if (input.screenWidth == null || input.screenHeight == null || !Array.isArray(input.nodes)) {
     throw new Error(
       "Invalid UI tree: missing required fields (screenWidth, screenHeight, nodes)",
+    );
+  }
+
+  // Zero/negative screen dimensions would mark every element invisible, and
+  // since off-screen elements are excluded by default the tool would return
+  // an empty tree with no error anywhere in the chain. Fail loudly instead.
+  if (input.screenWidth <= 0 || input.screenHeight <= 0) {
+    throw new Error(
+      `Invalid UI tree: non-positive screen dimensions (${input.screenWidth}x${input.screenHeight})`,
     );
   }
 

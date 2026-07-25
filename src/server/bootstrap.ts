@@ -74,7 +74,15 @@ export async function ensureDevice(deviceId: string): Promise<RegisteredDevice> 
     await bootstrapDevice(deviceId);
   });
   bootstrapChains.set(deviceId, next);
-  await next;
+  try {
+    await next;
+  } finally {
+    // Prune completed chains — one entry per device ever seen would
+    // otherwise accumulate for the process lifetime.
+    if (bootstrapChains.get(deviceId) === next) {
+      bootstrapChains.delete(deviceId);
+    }
+  }
 
   const device = getDevice(deviceId);
   if (!device) throw new Error(`Bootstrap failed for device ${deviceId}`);
@@ -350,14 +358,19 @@ async function bootstrapIOSSimulator(deviceId: string, port: number, authToken: 
 /// Pump a long-lived child process's stdout/stderr into a log file.
 /// The writer closes itself when the process dies and both streams EOF.
 function teeProcessOutput(proc: Subproc, logPath: string): void {
-  const writer = createWriteStream(logPath, { flags: "w" });
   const streams = [proc.stdout, proc.stderr].filter(
     (s): s is ReadableStream<Uint8Array> => s !== null,
   );
-  if (streams.length === 0) {
-    writer.end();
-    return;
-  }
+  // Early-return BEFORE creating the file: mocked spawns in tests have no
+  // streams, and creating the writer used to leak empty log files into
+  // ~/.mdms/logs on every test run.
+  if (streams.length === 0) return;
+  const writer = createWriteStream(logPath, { flags: "w" });
+  // WriteStream errors are delivered asynchronously via 'error'; without a
+  // listener an unhandled error takes down the whole MCP host process.
+  writer.on("error", (err) => {
+    console.error(`[mobile-device-mcp] log writer failed for ${logPath}: ${err.message}`);
+  });
   let open = streams.length;
   for (const stream of streams) {
     void (async () => {
@@ -448,7 +461,13 @@ async function healthPoll(port: number, serverProcess: Subproc): Promise<void> {
 /// device (issue #15). Without this, the first user-facing call pays the
 /// cold-snapshot cost and can exceed the 30s request timeout; the aborted
 /// request then poisons the next one (observed: timeout → empty 500 → OK).
-/// A failure here fails bootstrap so the caller retries with a fresh server.
+///
+/// Failure semantics: a timeout or connection error means the server is
+/// genuinely wedged — fail bootstrap so the caller retries with a fresh
+/// server. A non-2xx means the server is alive but the snapshot failed for
+/// the current foreground app (a state the on-device extractor itself
+/// treats as non-fatal); tap/screenshot/etc. would still work, so degrade
+/// to a warning and register the device anyway.
 async function warmup(port: number, authToken: string): Promise<void> {
   let res: Response;
   try {
@@ -457,13 +476,20 @@ async function warmup(port: number, authToken: string): Promise<void> {
       signal: AbortSignal.timeout(WARMUP_TIMEOUT),
     });
   } catch (err) {
-    throw new Error(
-      `Driver warmup failed: GET /uitree did not complete within ${WARMUP_TIMEOUT / 1000}s (${(err as Error).message})`,
-    );
+    const e = err as Error;
+    if (e.name === "TimeoutError") {
+      throw new Error(
+        `Driver warmup failed: GET /uitree did not complete within ${WARMUP_TIMEOUT / 1000}s — server is unresponsive`,
+      );
+    }
+    throw new Error(`Driver warmup failed: GET /uitree errored (${e.message})`);
   }
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Driver warmup failed: GET /uitree → ${res.status} ${body.slice(0, 200)}`);
+    console.error(
+      `[mobile-device-mcp] warmup snapshot failed (${res.status}: ${body.slice(0, 200)}) — registering device anyway`,
+    );
+    return;
   }
   await res.text(); // drain the body so the connection is released
 }

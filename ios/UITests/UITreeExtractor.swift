@@ -189,7 +189,7 @@ final class UITreeExtractor {
 
         var foundStatusBar = false
         for child in childDicts {
-            let elementTypeRaw = child[.elementType] as? Int ?? 0
+            let elementTypeRaw = child[.elementType] as? UInt ?? 0
             let label = child[.label] as? String ?? ""
             let identifier = child[.identifier] as? String ?? ""
             // Status bar: XCUIElementTypeStatusBar (25), or identifier/label contains StatusBar

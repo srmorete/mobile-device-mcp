@@ -658,13 +658,32 @@ describe("healthPoll", () => {
     expect(warmupCount).toBe(1);
   });
 
-  test("fails bootstrap when warmup fails", async () => {
-    spawnSpy = spyOn(Bun, "spawn").mockImplementation(androidSpawnMock("warmup-fail"));
+  test("warmup 500 degrades to registration with a warning", async () => {
+    spawnSpy = spyOn(Bun, "spawn").mockImplementation(androidSpawnMock("warmup-500"));
     processKillSpy = spyOn(process, "kill").mockImplementation(() => true);
 
     fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
       if (String(url).endsWith("/uitree")) {
         return new Response("boom", { status: 500 });
+      }
+      return new Response("OK", { status: 200 });
+    });
+    sleepSpy = spyOn(Bun, "sleep").mockImplementation(() => Promise.resolve());
+
+    // Server answered — it's alive, only the snapshot failed. Register anyway.
+    const dev = await ensureDevice("warmup-500");
+    expect(dev.id).toBe("warmup-500");
+  });
+
+  test("fails bootstrap when warmup cannot reach the server", async () => {
+    spawnSpy = spyOn(Bun, "spawn").mockImplementation(androidSpawnMock("warmup-fail"));
+    processKillSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+    fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
+      if (String(url).endsWith("/uitree")) {
+        const err = new Error("The operation timed out");
+        err.name = "TimeoutError";
+        throw err;
       }
       return new Response("OK", { status: 200 });
     });

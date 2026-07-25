@@ -71,6 +71,11 @@ describe("filterUITree validation", () => {
     ).toThrow("Invalid UI tree");
   });
 
+  test("throws on zero screen dimensions", () => {
+    expect(() => filterUITree(tree([], 0, 1920))).toThrow("non-positive screen dimensions");
+    expect(() => filterUITree(tree([], 1080, 0))).toThrow("non-positive screen dimensions");
+  });
+
   test("returns empty array for empty nodes", () => {
     expect(filterUITree(tree([]))).toEqual([]);
   });
@@ -351,6 +356,20 @@ describe("iOS element type mapping", () => {
     expect(typeOf(40).type).toBe("switch");
     expect(typeOf(43).type).toBe("image");
     expect(typeOf(58).type).toBe("webview");
+  });
+
+  test("interactive controls are clickable: switch (40), toggle (41), checkbox (12), slider (33), picker (38)", () => {
+    expect(typeOf(40)).toMatchObject({ type: "switch", clickable: true });
+    expect(typeOf(41)).toMatchObject({ type: "switch", clickable: true });
+    expect(typeOf(12)).toMatchObject({ type: "checkbox", clickable: true });
+    expect(typeOf(33)).toMatchObject({ type: "slider", clickable: true });
+    expect(typeOf(38)).toMatchObject({ type: "picker", clickable: true });
+  });
+
+  test("unlabeled switch is kept (clickable alone is enough)", () => {
+    const r = filterUITree(tree([iosNode({ label: "", elementType: 40 })]));
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ type: "switch", clickable: true });
   });
 
   test("unmapped type → other", () => {
