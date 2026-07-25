@@ -94,23 +94,7 @@ function iosSpawnMock(deviceId: string, deviceType: "simulator" | "device") {
     if (args.includes("lsof")) {
       return mockSubprocess(""); // port not in use
     }
-    // PlistBuddy — return a fake bundle ID (simulator flow)
-    if (args.includes("PlistBuddy")) {
-      return mockSubprocess("com.test.UITreeServerUITests.xctrunner\n");
-    }
-    // simctl install
-    if (args.includes("simctl") && args.includes("install")) {
-      return mockSubprocess("");
-    }
-    // simctl get_app_container
-    if (args.includes("simctl") && args.includes("get_app_container")) {
-      return mockSubprocess("/tmp/fake-container/UITreeServerUITests-Runner.app\n");
-    }
-    // simctl spawn (server process for simulator)
-    if (args.includes("simctl") && args.includes("spawn")) {
-      return mockServerProcess();
-    }
-    // xcodebuild (server process for real devices)
+    // xcodebuild (server process, simulator and real device)
     if (args.includes("xcodebuild")) {
       return mockServerProcess();
     }
@@ -391,10 +375,16 @@ describe("bootstrapIOS", () => {
     expect(dev.deviceType).toBe("simulator");
     expect(dev.port).toBeGreaterThanOrEqual(19000);
 
-    // Verify simctl install + spawn were used (not xcodebuild)
-    expect(spawnCalls.some((c) => c.join(" ").includes("simctl install"))).toBe(true);
-    expect(spawnCalls.some((c) => c.join(" ").includes("simctl spawn"))).toBe(true);
-    expect(spawnCalls.some((c) => c[0] === "xcodebuild")).toBe(false);
+    // Spec §2.4: simulators bootstrap through xcodebuild, like real devices
+    const xcBuild = spawnCalls.find((c) => c[0] === "xcodebuild");
+    expect(xcBuild).toBeDefined();
+    expect(xcBuild!.join(" ")).toContain(`platform=iOS Simulator,id=ios-sim-test`);
+    expect(xcBuild!.includes("-allowProvisioningUpdates")).toBe(false);
+    // -xctestrun must come from drivers/ios (trailing slash excludes drivers/ios-device)
+    const xctestrunArg = xcBuild![xcBuild!.indexOf("-xctestrun") + 1];
+    expect(xctestrunArg).toContain(join("drivers", "ios") + "/");
+    expect(spawnCalls.some((c) => c.join(" ").includes("simctl install"))).toBe(false);
+    expect(spawnCalls.some((c) => c.join(" ").includes("simctl spawn"))).toBe(false);
     // No iproxy for simulator
     expect(spawnCalls.some((c) => c[0] === "iproxy")).toBe(false);
     // Tunnel process should not be set
@@ -504,11 +494,11 @@ describe("bootstrapIOS", () => {
     }
   });
 
-  test("throws when no Runner.app found in simulator drivers", async () => {
+  test("throws when no .xctestrun driver found for iOS simulator", async () => {
     const originalReaddir = fs.readdirSync;
     const readdirSpy = spyOn(fs, "readdirSync").mockImplementation((path: any, opts?: any) => {
-      // Return empty dir for the iOS simulator build directory
-      if (String(path).includes("Debug-iphonesimulator")) return [] as any;
+      // Return empty dir for the iOS simulator drivers directory
+      if (String(path).endsWith(join("drivers", "ios"))) return [] as any;
       return originalReaddir(path, opts as any);
     });
 
@@ -516,85 +506,10 @@ describe("bootstrapIOS", () => {
     mockHealthy();
 
     try {
-      await expect(ensureDevice("no-runner")).rejects.toThrow("No Runner.app found");
+      await expect(ensureDevice("no-runner")).rejects.toThrow("No .xctestrun driver");
     } finally {
       readdirSpy.mockRestore();
     }
-  });
-
-  test("throws when PlistBuddy returns empty bundle ID", async () => {
-    spawnSpy = spyOn(Bun, "spawn").mockImplementation((cmd: any, opts?: any) => {
-      const args = (cmd as string[]).join(" ");
-      // Route to iOS simulator
-      if (args.includes("adb") && args.includes("devices")) {
-        return mockSubprocess("List of devices attached\n");
-      }
-      if (args.includes("simctl") && args.includes("list")) {
-        return mockSubprocess(JSON.stringify({
-          devices: { "runtime": [{ udid: "empty-plist", state: "Booted" }] },
-        }));
-      }
-      if (args.includes("lsof")) return mockSubprocess("");
-      // PlistBuddy returns empty string
-      if (args.includes("PlistBuddy")) return mockSubprocess("");
-      return mockSubprocess("");
-    });
-    mockHealthy();
-
-    await expect(ensureDevice("empty-plist")).rejects.toThrow("Could not read bundle ID");
-
-    unlockPort(19000);
-  });
-
-  test("throws when simctl install fails", async () => {
-    spawnSpy = spyOn(Bun, "spawn").mockImplementation((cmd: any, opts?: any) => {
-      const args = (cmd as string[]).join(" ");
-      if (args.includes("adb") && args.includes("devices")) {
-        return mockSubprocess("List of devices attached\n");
-      }
-      if (args.includes("simctl") && args.includes("list")) {
-        return mockSubprocess(JSON.stringify({
-          devices: { "runtime": [{ udid: "install-fail", state: "Booted" }] },
-        }));
-      }
-      if (args.includes("lsof")) return mockSubprocess("");
-      if (args.includes("PlistBuddy")) return mockSubprocess("com.test.Runner\n");
-      // simctl install returns non-zero
-      if (args.includes("simctl") && args.includes("install")) {
-        return mockSubprocess("device not found", 1);
-      }
-      return mockSubprocess("");
-    });
-    mockHealthy();
-
-    await expect(ensureDevice("install-fail")).rejects.toThrow("simctl install failed");
-
-    unlockPort(19000);
-  });
-
-  test("throws when simctl get_app_container returns empty", async () => {
-    spawnSpy = spyOn(Bun, "spawn").mockImplementation((cmd: any, opts?: any) => {
-      const args = (cmd as string[]).join(" ");
-      if (args.includes("adb") && args.includes("devices")) {
-        return mockSubprocess("List of devices attached\n");
-      }
-      if (args.includes("simctl") && args.includes("list")) {
-        return mockSubprocess(JSON.stringify({
-          devices: { "runtime": [{ udid: "no-container", state: "Booted" }] },
-        }));
-      }
-      if (args.includes("lsof")) return mockSubprocess("");
-      if (args.includes("PlistBuddy")) return mockSubprocess("com.test.Runner\n");
-      if (args.includes("simctl") && args.includes("install")) return mockSubprocess("");
-      // get_app_container returns empty
-      if (args.includes("simctl") && args.includes("get_app_container")) return mockSubprocess("");
-      return mockSubprocess("");
-    });
-    mockHealthy();
-
-    await expect(ensureDevice("no-container")).rejects.toThrow("Could not get app container path");
-
-    unlockPort(19000);
   });
 
   test("throws when no xctestrun driver found for iOS device", async () => {
@@ -639,12 +554,7 @@ describe("healthPoll", () => {
     processKillSpy = spyOn(process, "kill").mockImplementation(() => true);
 
     let healthCount = 0;
-    let warmupCount = 0;
     fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
-      if (String(url).endsWith("/uitree")) {
-        warmupCount++;
-        return new Response("{}", { status: 200 });
-      }
       healthCount++;
       if (healthCount < 3) throw new Error("ECONNREFUSED");
       return new Response("OK", { status: 200 });
@@ -654,42 +564,6 @@ describe("healthPoll", () => {
     const dev = await ensureDevice("health-retry");
     expect(dev.id).toBe("health-retry");
     expect(healthCount).toBe(3);
-    // Warmup issues one real snapshot before the device is registered (issue #15)
-    expect(warmupCount).toBe(1);
-  });
-
-  test("warmup 500 degrades to registration with a warning", async () => {
-    spawnSpy = spyOn(Bun, "spawn").mockImplementation(androidSpawnMock("warmup-500"));
-    processKillSpy = spyOn(process, "kill").mockImplementation(() => true);
-
-    fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
-      if (String(url).endsWith("/uitree")) {
-        return new Response("boom", { status: 500 });
-      }
-      return new Response("OK", { status: 200 });
-    });
-    sleepSpy = spyOn(Bun, "sleep").mockImplementation(() => Promise.resolve());
-
-    // Server answered — it's alive, only the snapshot failed. Register anyway.
-    const dev = await ensureDevice("warmup-500");
-    expect(dev.id).toBe("warmup-500");
-  });
-
-  test("fails bootstrap when warmup cannot reach the server", async () => {
-    spawnSpy = spyOn(Bun, "spawn").mockImplementation(androidSpawnMock("warmup-fail"));
-    processKillSpy = spyOn(process, "kill").mockImplementation(() => true);
-
-    fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
-      if (String(url).endsWith("/uitree")) {
-        const err = new Error("The operation timed out");
-        err.name = "TimeoutError";
-        throw err;
-      }
-      return new Response("OK", { status: 200 });
-    });
-    sleepSpy = spyOn(Bun, "sleep").mockImplementation(() => Promise.resolve());
-
-    await expect(ensureDevice("warmup-fail")).rejects.toThrow(/warmup/i);
   });
 
   test("throws when server process dies during health poll", async () => {

@@ -128,9 +128,9 @@ function isIOSFormat(nodes: unknown[]): boolean {
 // --- 5.2 iOS Normalization ---
 
 const IOS_INPUT_TYPES = new Set(["input"]);
-// Interactive control types — without these, a labeled switch/checkbox was
-// reported clickable:false and an unlabeled one was dropped from the tree
-// entirely (code review follow-up to issue #12).
+// Interactive control types — without these, a labeled switch/checkbox is
+// reported clickable:false and an unlabeled one is dropped from the tree
+// entirely.
 const IOS_CLICKABLE_TYPES = new Set(["button", "link", "input", "switch", "checkbox", "slider", "picker"]);
 
 function normalizeIOSNode(node: IOSNode): AndroidNode {
@@ -245,8 +245,7 @@ function flattenTree(
             type: resolveType(node.className),
             // Intersection with the screen rect, not center-inside: a giant
             // container (e.g. a full web page) has an off-screen center but is
-            // partly on screen, and a half-visible edge element counts too
-            // (issue #13).
+            // partly on screen, and a half-visible edge element counts too.
             visible:
               b.left < ctx.screenWidth &&
               b.right > 0 &&
@@ -367,7 +366,7 @@ function reassignIds(elements: FilteredElement[]): FilteredElement[] {
   return elements;
 }
 
-// --- 5.8 Search ranking (issue #14) ---
+// --- 5.8 Search ranking ---
 
 function boundsArea(b: Bounds): number {
   return (b.right - b.left) * (b.bottom - b.top);
@@ -410,7 +409,7 @@ export function rankSearchResults(elements: FilteredElement[]): FilteredElement[
 // --- Main export ---
 
 export interface FilterOptions {
-  /// Include off-screen elements (default false — issue #13).
+  /// Include off-screen elements (default false).
   includeInvisible?: boolean;
 }
 

@@ -1,6 +1,24 @@
 import XCTest
 import FlyingFox
 
+/// Serializes request handlers strictly one at a time, in arrival order.
+/// Work runs in unstructured tasks so a cancelled client (aborted HTTP
+/// request) cannot cancel the server-side work mid-flight — the in-flight
+/// snapshot completes and the queue drains instead of wedging.
+private actor RequestQueue {
+    private var tail: Task<Void, Never>?
+
+    func enqueue<T>(_ work: @escaping () async -> T) async -> T {
+        let previous = tail
+        let task = Task {
+            _ = await previous?.result
+            return await work()
+        }
+        tail = Task { _ = await task.result }
+        return await task.value
+    }
+}
+
 final class UITreeServer: XCTestCase {
 
     func testStartServer() async throws {
@@ -11,15 +29,10 @@ final class UITreeServer: XCTestCase {
         let server = try HTTPServer(address: .inet(ip4: "127.0.0.1", port: port))
 
         AppManager.installQuiescenceBypass()
-        // Activate the bypass server-wide, not just during run_code (issue #15):
-        // snapshotting a busy app (e.g. Safari's WebKit.WebContent on an animated
-        // page) blocks in quiescence waits for 60s+ on a cold AX channel, which
-        // outlives the host's 30s request timeout and wedges the first calls of
-        // every session. JsEngine's own increment/decrement still composes.
-        // Note: this does NOT change run_code semantics — exec already wrapped
-        // every script in increment/decrement, so _waitForExistence/_waitForHittable
-        // short-circuited during scripts all along. What changes: native tool
-        // calls (tap, uitree, ...) also skip those waits now.
+        // Server-wide quiescence bypass: snapshotting a busy app (e.g. Safari
+        // on an animated page) otherwise blocks in quiescence waits for 60s+
+        // on a cold AX channel. JsEngine's own increment/decrement composes
+        // with this count.
         AppManager.skipQuiescence.increment()
         let extractor = UITreeExtractor()
         let interactions = Interactions(extractor: extractor)
@@ -261,20 +274,31 @@ final class UITreeServer: XCTestCase {
         return result
     }
 
-    static func exceptionGuard(_ handler: () async throws -> HTTPResponse) async -> HTTPResponse {
-        do {
-            return try await handler()
-        } catch {
-            let reason = (error as NSError).localizedDescription
-            // stderr lands in the host-side log file (mdms-ios-<port>.log) — an
-            // otherwise empty 500 body leaves no trace (issue #15).
-            Self.log("500: \(reason)")
-            return HTTPResponse(
-                statusCode: .internalServerError,
-                body: Data(reason.utf8)
-            )
+    /// All guarded routes funnel through here, so this is also the single
+    /// point where requests are serialized: testmanagerd serves one request
+    /// at a time, so a concurrent second request would wait opaquely inside
+    /// XCTest and then fail. The explicit queue makes that wait visible and
+    /// keeps a slow snapshot from colliding with the next request. /health is
+    /// deliberately unguarded: liveness must be reportable while a snapshot
+    /// is in flight.
+    static func exceptionGuard(_ handler: @escaping () async throws -> HTTPResponse) async -> HTTPResponse {
+        await requestQueue.enqueue {
+            do {
+                return try await handler()
+            } catch {
+                let reason = (error as NSError).localizedDescription
+                // stderr lands in the host-side log (~/.mdms/logs/ios-<port>.log) —
+                // an otherwise empty 500 body leaves no trace.
+                Self.log("500: \(reason)")
+                return HTTPResponse(
+                    statusCode: .internalServerError,
+                    body: Data(reason.utf8)
+                )
+            }
         }
     }
+
+    private static let requestQueue = RequestQueue()
 
     /// Unbuffered stderr log. NSLog only reaches the simulator system log,
     /// which the host-side log file never sees.

@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "os";
 import { join } from "path";
 import { randomBytes } from "crypto";
 import type { RegisteredDevice, DeviceType } from "./types.js";
-import { spawn, sleep, type Subproc } from "./proc.js";
+import { spawn, sleep, killProcessTree, type Subproc } from "./proc.js";
 import {
   getDevice,
   setDevice,
@@ -18,22 +18,15 @@ import {
   releasePendingPort,
   unlockPort,
   cleanupStalePorts,
-  killPortListener,
 } from "./ports.js";
 
-// Adaptive health-poll schedule (issue #6): driver servers often come up in
-// ~50ms, so probe aggressively at first, then settle into 500ms to avoid
-// hammering a slow device. The fixed 500ms interval used to add a ~500ms
-// floor to every cold bootstrap.
+// Driver servers often come up in ~50ms, so probe aggressively at first,
+// then settle into 500ms to avoid hammering a slow device.
 const HEALTH_POLL_SCHEDULE = [25, 50, 100, 200];
 const HEALTH_POLL_INTERVAL = 500;
-const HEALTH_TIMEOUT = 45_000;
-
-// One-time warmup budget for the first real snapshot (issue #15). The first
-// app.snapshot() after server boot pays AX/testmanagerd setup cost — observed
-// >30s on a heavy WebKit.WebContent tree — so the 30s per-request timeout
-// cannot cover it. Pay that cost here, once, before the device is registered.
-const WARMUP_TIMEOUT = 60_000;
+// Must outlast xcodebuild cold start (destination resolution + runner install
+// + testmanagerd handshake): ~40s on an idle machine; 3x headroom.
+const HEALTH_TIMEOUT = 120_000;
 
 // Source form (src/server/) is two levels above drivers/; bundled form (bin/) is one.
 function resolveProjectRoot(moduleDir: string): string {
@@ -126,7 +119,7 @@ async function bootstrapAndroid(deviceId: string): Promise<void> {
     await runAdb(deviceId, "forward", `tcp:${port}`, `tcp:${port}`);
 
     // CDP forwarding: route device:9222 → host:cdpPort → device Chrome abstract socket
-    // ADB daemon bypasses SELinux app-to-app restrictions (CdpBridge.kt couldn't)
+    // ADB daemon bypasses SELinux app-to-app restrictions
     cdpPort = await setupCdpForwarding(deviceId);
 
     // Write auth token to device file (avoids exposing in process args / ps output)
@@ -143,9 +136,8 @@ async function bootstrapAndroid(deviceId: string): Promise<void> {
       { stdout: "ignore", stderr: "ignore" },
     );
 
-    // Health poll, then a real snapshot so the first user call is warm
+    // Health poll
     await healthPoll(port, serverProcess);
-    await warmup(port, authToken);
 
     // Register
     setDevice({
@@ -244,17 +236,12 @@ async function bootstrapIOS(deviceId: string, deviceType: DeviceType): Promise<v
   let serverProcess: Subproc | undefined;
   let tunnelProcess: Subproc | undefined;
   try {
-    if (deviceType === "simulator") {
-      serverProcess = await bootstrapIOSSimulator(deviceId, port, authToken);
-    } else {
-      const result = await bootstrapIOSDevice(deviceId, port, authToken);
-      serverProcess = result.serverProcess;
-      tunnelProcess = result.tunnelProcess;
-    }
+    const result = spawnIOSServer(deviceId, deviceType, port, authToken);
+    serverProcess = result.serverProcess;
+    tunnelProcess = result.tunnelProcess;
 
-    // Health poll, then a real snapshot so the first user call is warm
+    // Health poll
     await healthPoll(port, serverProcess);
-    await warmup(port, authToken);
 
     // Register
     setDevice({
@@ -267,92 +254,15 @@ async function bootstrapIOS(deviceId: string, deviceType: DeviceType): Promise<v
       tunnelProcess,
     });
   } catch (err) {
-    // Cleanup on failure
-    if (serverProcess) {
-      try { serverProcess.kill(9); } catch { /* */ }
-    }
-    if (tunnelProcess) {
-      try { tunnelProcess.kill(9); } catch { /* */ }
-    }
-    // For simulators, the spawn handle kill above doesn't kill the real server —
-    // kill whatever is actually listening on the port to prevent orphans.
-    if (deviceType === "simulator") {
-      await killPortListener(port);
-    }
+    // Cleanup on failure — kill the whole session tree: the runner launched
+    // by xcodebuild survives a bare handle kill and would hold the port.
+    if (serverProcess) killProcessTree(serverProcess);
+    if (tunnelProcess) killProcessTree(tunnelProcess);
     unlockPort(port);
     throw err;
   } finally {
     releasePendingPort(port);
   }
-}
-
-// ── iOS simulator: simctl install + spawn (bypasses xcodebuild orchestration) ──
-
-async function bootstrapIOSSimulator(deviceId: string, port: number, authToken: string): Promise<Subproc> {
-  const buildDir = join(DRIVERS_IOS_SIM, "Debug-iphonesimulator");
-  const runnerApp = readdirSync(buildDir).find((f) => f.endsWith("-Runner.app"));
-  if (!runnerApp) {
-    throw new Error("No Runner.app found in iOS simulator drivers");
-  }
-  const runnerAppPath = join(buildDir, runnerApp);
-  const binaryName = runnerApp.replace(/\.app$/, "");
-
-  // Read bundle ID from Info.plist
-  const plistProc = spawn(
-    ["/usr/libexec/PlistBuddy", "-c", "Print :CFBundleIdentifier", join(runnerAppPath, "Info.plist")],
-    { stdout: "pipe", stderr: "pipe" },
-  );
-  const bundleId = (await new Response(plistProc.stdout).text()).trim();
-  await plistProc.exited;
-  if (!bundleId) {
-    throw new Error("Could not read bundle ID from Runner.app Info.plist");
-  }
-
-  // Install the app on the simulator
-  const installProc = spawn(
-    ["xcrun", "simctl", "install", deviceId, runnerAppPath],
-    { stdout: "pipe", stderr: "pipe" },
-  );
-  const installExit = await installProc.exited;
-  if (installExit !== 0) {
-    const stderr = await new Response(installProc.stderr).text();
-    throw new Error(`simctl install failed: ${stderr}`);
-  }
-
-  // Get installed app container path
-  const containerProc = spawn(
-    ["xcrun", "simctl", "get_app_container", deviceId, bundleId],
-    { stdout: "pipe", stderr: "pipe" },
-  );
-  const containerPath = (await new Response(containerProc.stdout).text()).trim();
-  await containerProc.exited;
-  if (!containerPath) {
-    throw new Error("Could not get app container path after install");
-  }
-
-  // Spawn the runner binary inside the simulator (no foreground, no SpringBoard).
-  // stdout/stderr are piped to a log file instead of ignored: the on-device
-  // server writes diagnostics there (issue #15 — an empty 500 body from the
-  // device server used to leave no trace anywhere).
-  const serverProcess = spawn(
-    ["xcrun", "simctl", "spawn", deviceId, join(containerPath, binaryName)],
-    {
-      stdout: "pipe",
-      stderr: "pipe",
-      env: {
-        ...process.env,
-        SIMCTL_CHILD_PORT: String(port),
-        SIMCTL_CHILD_AUTH_TOKEN: authToken,
-      },
-    },
-  );
-  // Log location mirrors the port-lock dir (~/.mdms/) rather than tmpdir():
-  // MCP hosts may scrub TMPDIR from our environment, making os.tmpdir()
-  // resolve differently than the user's shell (issue #15 debugging hazard).
-  const logDir = join(homedir(), ".mdms", "logs");
-  mkdirSync(logDir, { recursive: true, mode: 0o700 });
-  teeProcessOutput(serverProcess, join(logDir, `ios-${port}.log`));
-  return serverProcess;
 }
 
 /// Pump a long-lived child process's stdout/stderr into a log file.
@@ -361,11 +271,11 @@ function teeProcessOutput(proc: Subproc, logPath: string): void {
   const streams = [proc.stdout, proc.stderr].filter(
     (s): s is ReadableStream<Uint8Array> => s !== null,
   );
-  // Early-return BEFORE creating the file: mocked spawns in tests have no
-  // streams, and creating the writer used to leak empty log files into
-  // ~/.mdms/logs on every test run.
+  // Early-return before creating the file: mocked spawns in tests have no
+  // streams — don't create empty log files on every test run.
   if (streams.length === 0) return;
-  const writer = createWriteStream(logPath, { flags: "w" });
+  const writer = createWriteStream(logPath, { flags: "a" });
+  writer.write(`\n── server output begins (pid ${proc.pid ?? "?"}) ──\n`);
   // WriteStream errors are delivered asynchronously via 'error'; without a
   // listener an unhandled error takes down the whole MCP host process.
   writer.on("error", (err) => {
@@ -390,43 +300,55 @@ function teeProcessOutput(proc: Subproc, logPath: string): void {
   }
 }
 
-// ── iOS real device: xcodebuild (still required for testmanagerd handshake) ──
+// ── iOS: one xcodebuild test session for simulators and real devices (spec §2.4) ──
+// xcodebuild owns the runner's lifecycle: killing the session kills the server,
+// and uninstalling the runner app kills it too. No ad-hoc processes.
 
-async function bootstrapIOSDevice(
-  deviceId: string, port: number, authToken: string,
-): Promise<{ serverProcess: Subproc; tunnelProcess: Subproc }> {
-  const xctestrunFile = readdirSync(DRIVERS_IOS_DEVICE).find((f) => f.endsWith(".xctestrun"));
+function spawnIOSServer(
+  deviceId: string, deviceType: DeviceType, port: number, authToken: string,
+): { serverProcess: Subproc; tunnelProcess?: Subproc } {
+  const driversDir = deviceType === "simulator" ? DRIVERS_IOS_SIM : DRIVERS_IOS_DEVICE;
+  const xctestrunFile = readdirSync(driversDir).filter((f) => f.endsWith(".xctestrun")).sort()[0];
   if (!xctestrunFile) {
-    throw new Error("No .xctestrun driver found for iOS device");
+    throw new Error(`No .xctestrun driver found in ${driversDir}`);
   }
 
-  const serverProcess = spawn(
-    [
-      "xcodebuild", "test-without-building",
-      "-xctestrun", join(DRIVERS_IOS_DEVICE, xctestrunFile),
-      "-destination", `platform=iOS,id=${deviceId}`,
-      "-parallel-testing-enabled", "NO",
-      "-allowProvisioningUpdates",
-    ],
-    {
-      // xcodebuild writes Logs/Test artifacts to cwd; don't pollute whatever dir
-      // Claude Code was launched from.
-      cwd: tmpdir(),
-      stdout: "ignore",
-      stderr: "ignore",
-      env: {
-        ...process.env,
-        TEST_RUNNER_PORT: String(port),
-        TEST_RUNNER_AUTH_TOKEN: authToken,
-      },
-    },
-  );
+  const args = [
+    "xcodebuild", "test-without-building",
+    "-xctestrun", join(driversDir, xctestrunFile),
+    "-destination",
+    deviceType === "simulator" ? `platform=iOS Simulator,id=${deviceId}` : `platform=iOS,id=${deviceId}`,
+    "-parallel-testing-enabled", "NO",
+  ];
+  if (deviceType !== "simulator") {
+    args.push("-allowProvisioningUpdates");
+  }
 
+  const serverProcess = spawn(args, {
+    // xcodebuild writes Logs/Test artifacts to cwd; don't pollute the MCP host's cwd.
+    cwd: tmpdir(),
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      TEST_RUNNER_PORT: String(port),
+      TEST_RUNNER_AUTH_TOKEN: authToken,
+    },
+  });
+
+  // The on-device server's diagnostics ride xcodebuild's output stream. Append:
+  // a re-bootstrap must not erase a dying server's final lines.
+  const logDir = join(homedir(), ".mdms", "logs");
+  mkdirSync(logDir, { recursive: true, mode: 0o700 });
+  teeProcessOutput(serverProcess, join(logDir, `ios-${port}.log`));
+
+  if (deviceType === "simulator") {
+    return { serverProcess };
+  }
   const tunnelProcess = spawn(
     ["iproxy", String(port), String(port), "-u", deviceId, "-l", "127.0.0.1"],
     { stdout: "ignore", stderr: "ignore" },
   );
-
   return { serverProcess, tunnelProcess };
 }
 
@@ -451,45 +373,6 @@ async function healthPoll(port: number, serverProcess: Subproc): Promise<void> {
     await sleep(delay);
   }
   // Timeout: kill and throw
-  try { serverProcess.kill(9); } catch { /* */ }
+  killProcessTree(serverProcess);
   throw new Error(`Health check timed out after ${HEALTH_TIMEOUT}ms on port ${port}`);
-}
-
-// ── Warmup ──
-
-/// Issue one real authenticated snapshot request before registering the
-/// device (issue #15). Without this, the first user-facing call pays the
-/// cold-snapshot cost and can exceed the 30s request timeout; the aborted
-/// request then poisons the next one (observed: timeout → empty 500 → OK).
-///
-/// Failure semantics: a timeout or connection error means the server is
-/// genuinely wedged — fail bootstrap so the caller retries with a fresh
-/// server. A non-2xx means the server is alive but the snapshot failed for
-/// the current foreground app (a state the on-device extractor itself
-/// treats as non-fatal); tap/screenshot/etc. would still work, so degrade
-/// to a warning and register the device anyway.
-async function warmup(port: number, authToken: string): Promise<void> {
-  let res: Response;
-  try {
-    res = await fetch(`http://127.0.0.1:${port}/uitree`, {
-      headers: { Authorization: `Bearer ${authToken}` },
-      signal: AbortSignal.timeout(WARMUP_TIMEOUT),
-    });
-  } catch (err) {
-    const e = err as Error;
-    if (e.name === "TimeoutError") {
-      throw new Error(
-        `Driver warmup failed: GET /uitree did not complete within ${WARMUP_TIMEOUT / 1000}s — server is unresponsive`,
-      );
-    }
-    throw new Error(`Driver warmup failed: GET /uitree errored (${e.message})`);
-  }
-  if (!res.ok) {
-    const body = await res.text();
-    console.error(
-      `[mobile-device-mcp] warmup snapshot failed (${res.status}: ${body.slice(0, 200)}) — registering device anyway`,
-    );
-    return;
-  }
-  await res.text(); // drain the body so the connection is released
 }

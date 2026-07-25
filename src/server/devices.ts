@@ -2,7 +2,6 @@ import { unlinkSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import type { RegisteredDevice, DiscoveredDevice, Platform, DeviceType } from "./types.js";
-import { killPortListener } from "./ports.js";
 import { spawn } from "./proc.js";
 
 const LOCK_DIR = join(homedir(), ".mdms", "ports");
@@ -256,12 +255,6 @@ export async function cleanupDevice(device: RegisteredDevice): Promise<void> {
       await Promise.allSettled(removes);
     } catch { /* adb not available */ }
   } else if (device.platform === "ios") {
-    // For simulators, kill the actual server inside the simulator.
-    // serverProcess is just the simctl spawn handle — the real server
-    // runs under the simulator's launchd and survives handle death.
-    if (device.deviceType === "simulator") {
-      await killPortListener(device.port);
-    }
     // Delete port lock file
     try {
       unlinkSync(join(LOCK_DIR, String(device.port)));

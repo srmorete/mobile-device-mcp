@@ -37,23 +37,26 @@ function authHeaders(device: RegisteredDevice): Record<string, string> {
   return { "Authorization": `Bearer ${device.authToken}` };
 }
 
-const REQUEST_TIMEOUT = 30_000; // 30s — long enough for screenshots, short enough to detect dead servers
-
+// Deliberately no client-side request timeout: an abort does not cancel
+// server-side work, so a timeout here only orphans in-flight work and poisons
+// the next request.
+// Detection coverage: a dead server fails fast (refused connection, closed
+// socket, exitCode in ensureDevice). A live-but-stuck server is not covered —
+// it relies on XCTest's internal bounds (~60s) and on XCTest killing hung
+// tests, which converts stuck into dead.
 async function executeRequest(device: RegisteredDevice, req: ProxyRequest): Promise<Response> {
   const headers = authHeaders(device);
-  const signal = AbortSignal.timeout(REQUEST_TIMEOUT);
   if (req.method === "GET") {
-    return fetch(buildUrl(device.port, req.path), { headers, signal });
+    return fetch(buildUrl(device.port, req.path), { headers });
   }
   if ("queryParams" in req) {
-    return fetch(buildUrl(device.port, req.path, req.queryParams), { method: "POST", headers, signal });
+    return fetch(buildUrl(device.port, req.path, req.queryParams), { method: "POST", headers });
   }
   // POST with body
   return fetch(buildUrl(device.port, req.path), {
     method: "POST",
     headers: { ...headers, "Content-Type": "text/plain" },
     body: req.body,
-    signal,
   });
 }
 
@@ -81,14 +84,12 @@ export async function proxyRequest(
   try {
     return await attempt(device);
   } catch (err) {
-    if (isConnectionError(err)) {
-      // Remove device, re-bootstrap, retry once
-      const old = removeDevice(deviceId);
-      if (old) await cleanupDevice(old);
-      device = await ensureDevice(deviceId);
-      return attempt(device);
-    }
-    throw err;
+    if (!isConnectionError(err)) throw err;
+    // Spec §2.3: on connection error, remove the device, re-bootstrap, retry once.
+    const old = removeDevice(deviceId);
+    if (old) await cleanupDevice(old);
+    device = await ensureDevice(deviceId);
+    return attempt(device);
   }
 }
 

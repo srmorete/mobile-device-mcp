@@ -1,13 +1,8 @@
 // Runtime-agnostic subprocess shim.
 //
-// The published package ships a Node-bundled cli.js (shebang `#!/usr/bin/env node`),
-// but `Bun.spawn` is a Bun-only runtime global that `bun build --target node` does
-// not polyfill. Without this shim, every `Bun.spawn(...)` call throws
-// `ReferenceError: Bun is not defined` under `npx`, and `discoverAndroid` swallows
-// the error into `[]` — which is the bug reported in issue #2.
-//
-// Under Bun this delegates to `Bun.spawn` so test spies on `Bun.spawn` keep working.
-// Under Node it wraps `child_process.spawn` in the Bun-shaped API the callers use.
+// The published package runs cli.js under Node, where the Bun global does not
+// exist. Under Bun this delegates to Bun.spawn so test spies keep working;
+// under Node it wraps child_process.spawn in the same Bun-shaped API.
 
 import { spawn as nodeSpawn } from "child_process";
 import { Readable } from "stream";
@@ -50,7 +45,7 @@ export function nodeAdapter(cmd: string[], options: SpawnOptions = {}): Subproc 
   const [command, ...args] = cmd;
   const child = nodeSpawn(command, args, {
     // Make the child its own process-group leader so cleanup can reap the whole
-    // tree via process.kill(-pid) (issue #4). Without this, grandchildren of
+    // tree via process.kill(-pid). Without this, grandchildren of
     // xcodebuild / iproxy / adb-instrumentation orphan on cleanup under Node.
     // NOTE: deliberately no child.unref() — the parent must keep waiting on it.
     detached: true,
@@ -101,4 +96,17 @@ export function nodeAdapter(cmd: string[], options: SpawnOptions = {}): Subproc 
       child.kill(signal);
     },
   };
+}
+
+/// SIGKILL the whole process group (spawn() makes children group leaders so
+/// grandchildren — the test runner under xcodebuild, instrumentation under
+/// adb — die with the handle). Falls back to killing just the process.
+export function killProcessTree(proc: Subproc): void {
+  try {
+    if (proc.pid && proc.pid > 0) {
+      process.kill(-proc.pid, "SIGKILL");
+      return;
+    }
+  } catch { /* group kill failed — try the handle */ }
+  try { proc.kill(9); } catch { /* already dead */ }
 }

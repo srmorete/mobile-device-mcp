@@ -55,7 +55,7 @@ final class AppManager {
 
     private static let _swizzle: Void = {
         // Install bookkeeping: missing selectors must be visible in the log —
-        // a silent no-op swizzle cost us a full debug cycle (issue #15).
+        // a silent no-op swizzle is a debugging dead end.
         func findMethod(_ cls: AnyClass, _ selName: String) -> Method? {
             let sel = NSSelectorFromString(selName)
             guard let m = class_getInstanceMethod(cls, sel) else {
@@ -146,14 +146,13 @@ final class AppManager {
         swizzleWait(elem, "_waitForHittableWithTimeout:")
 
         // The snapshot path waits for quiescence on XCUIApplicationProcess, NOT
-        // on XCUIApplication (issue #15): the first snapshot of a busy process
-        // (e.g. Safari's WebKit.WebContent) blocked here for exactly 60s until
-        // XCTest's internal quiescence timeout elapsed.
+        // on XCUIApplication: a snapshot of a busy process (e.g. Safari) blocks
+        // here for up to 60s (XCTest's internal quiescence timeout).
         if let proc = NSClassFromString("XCUIApplicationProcess") {
             swizzleVoidBool2(proc, "waitForQuiescenceIncludingAnimationsIdle:isPreEvent:")
             swizzleVoidBoolObjBool(proc, "waitForQuiescenceIncludingAnimationsIdle:usingActivity:isPreEvent:")
             // XCTest's own skip flags + check initiator — cover every entry
-            // point into the 60s quiescence wait (issue #15).
+            // point into the 60s quiescence wait.
             swizzleBoolGetterTrue(proc, "shouldSkipPreEventQuiescence")
             swizzleBoolGetterTrue(proc, "shouldSkipPostEventQuiescence")
             swizzleVoidBool(proc, "_initiateQuiescenceChecksIncludingAnimationsIdle:")

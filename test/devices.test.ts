@@ -466,7 +466,11 @@ describe("cleanupDevice", () => {
     killMock.mockRestore();
   });
 
-  test("iOS simulator cleanup calls killPortListener before deleting lock", async () => {
+  test("iOS simulator cleanup deletes lock file without touching the port listener", async () => {
+    // Spec §2.6: iOS cleanup = kill processes + delete lock file. The server
+    // runs as a managed xcodebuild session, so the process-group kill above is
+    // what takes the server down — no lsof-based port kill (that hack existed
+    // only because simctl-spawned servers survived their handle).
     const lockDir = join(homedir(), ".mdms", "ports");
     mkdirSync(lockDir, { recursive: true });
     const lockPath = join(lockDir, "22197");
@@ -475,7 +479,7 @@ describe("cleanupDevice", () => {
     const spawnCalls: string[][] = [];
     const spawn = spyOn(Bun, "spawn").mockImplementation((cmd: any) => {
       spawnCalls.push(cmd as string[]);
-      return mockSubprocess("12345\n");
+      return mockSubprocess("");
     });
     const killMock = spyOn(process, "kill").mockImplementation(() => true);
 
@@ -489,10 +493,7 @@ describe("cleanupDevice", () => {
     };
     await cleanupDevice(dev);
 
-    // Should have spawned lsof to find the listener
-    expect(spawnCalls.some((c) => c[0] === "lsof")).toBe(true);
-    // Should have killed the listener PID
-    expect(killMock).toHaveBeenCalledWith(12345, "SIGKILL");
+    expect(spawnCalls.some((c) => c[0] === "lsof")).toBe(false);
     // Lock file should be deleted
     expect(existsSync(lockPath)).toBe(false);
 
