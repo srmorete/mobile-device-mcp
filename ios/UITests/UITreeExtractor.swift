@@ -192,9 +192,9 @@ final class UITreeExtractor {
             let elementTypeRaw = child[.elementType] as? Int ?? 0
             let label = child[.label] as? String ?? ""
             let identifier = child[.identifier] as? String ?? ""
-            // Status bar: type 38 (statusBar), or identifier/label contains StatusBar
+            // Status bar: XCUIElementTypeStatusBar (25), or identifier/label contains StatusBar
             if identifier.contains("StatusBar") || label.contains("StatusBar")
-                || elementTypeRaw == 38 {
+                || elementTypeRaw == 25 {
                 nodes.append(buildNode(from: child))
                 foundStatusBar = true
             }
