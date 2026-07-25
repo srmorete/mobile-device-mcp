@@ -199,14 +199,14 @@ export function registerTools(server: McpServer): void {
         const rawJson = await proxyGet(device_id, "/uitree");
         const rawTree = JSON.parse(rawJson);
 
-        // 2. Filter through UI tree filter (off-screen excluded by default, issue #13)
+        // 2. Filter through UI tree filter (off-screen excluded by default)
         let elements: FilteredElement[] = filterUITree(rawTree, {
           includeInvisible: include_invisible ?? false,
         });
 
         // 3. Search: case-insensitive substring on text.
         // Ranked leaf-oriented: visible first, containers that contain other
-        // matches last, smaller area first (issue #14).
+        // matches last, smaller area first.
         if (search) {
           const lower = search.toLowerCase();
           elements = rankSearchResults(

@@ -269,7 +269,7 @@ describe("type resolution", () => {
   });
 });
 
-// --- Visibility (issue #13: intersection semantics, off-screen excluded by default) ---
+// --- Visibility (intersection semantics, off-screen excluded by default) ---
 
 describe("visibility", () => {
   test("on screen → visible", () => {
@@ -324,7 +324,7 @@ describe("visibility", () => {
   });
 });
 
-// --- iOS element type mapping (issue #12: public XCUIElementType numbering) ---
+// --- iOS element type mapping (public XCUIElementType numbering) ---
 
 describe("iOS element type mapping", () => {
   const typeOf = (elementType: number) =>
@@ -377,7 +377,7 @@ describe("iOS element type mapping", () => {
   });
 });
 
-// --- Search ranking (issue #14: leaf-oriented) ---
+// --- Search ranking (leaf-oriented) ---
 
 describe("rankSearchResults", () => {
   const el = (overrides: Partial<FilteredElement>): FilteredElement => ({

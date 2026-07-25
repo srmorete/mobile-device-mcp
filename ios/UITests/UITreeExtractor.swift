@@ -149,21 +149,6 @@ final class UITreeExtractor {
                 appendStatusBarNodes(to: &nodes)
             }
 
-            // Include Safari WebView service UI tree if Safari is in foreground.
-            // Wrapped in ObjCExceptionCatcher: WebKit.WebContent snapshot can throw
-            // NSExceptions on complex pages. Failure here is non-fatal — we still
-            // return the main app tree + status bar.
-            if appBundleId == "com.apple.mobilesafari" {
-                try? ObjCExceptionCatcher.catchException {
-                    let webContent = XCUIApplication(bundleIdentifier: "com.apple.WebKit.WebContent")
-                    if webContent.state == .runningForeground {
-                        if let webSnapshot = try? webContent.snapshot() {
-                            nodes.append(self.buildNode(from: webSnapshot.dictionaryRepresentation))
-                        }
-                    }
-                }
-            }
-
             return [
                 "screenWidth": screenWidth,
                 "screenHeight": screenHeight,
@@ -287,8 +272,8 @@ final class UITreeExtractor {
             ).rounded()
 
             // Full ImageIO pipeline: decode -> purpose-built thumbnail downscaler -> JPEG
-            // encode. CGImageSourceCreateThumbnailAtIndex is ~2-3x faster than the old
-            // UIGraphicsImageRenderer + draw(in:) CGContext round-trip (issue #5).
+            // encode. CGImageSourceCreateThumbnailAtIndex is ~2-3x faster than a
+            // UIGraphicsImageRenderer + draw(in:) CGContext round-trip.
             let pngData = screenshot.pngRepresentation
             guard let source = CGImageSourceCreateWithData(pngData as CFData, nil) else {
                 throw UITreeError.screenshotEncodingFailed
