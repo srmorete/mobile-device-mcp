@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, statSync } from "fs";
-import { tmpdir } from "os";
+import { createWriteStream, existsSync, mkdirSync, readdirSync, statSync } from "fs";
+import { homedir, tmpdir } from "os";
 import { join } from "path";
 import { randomBytes } from "crypto";
 import type { RegisteredDevice, DeviceType } from "./types.js";
@@ -28,6 +28,12 @@ import {
 const HEALTH_POLL_SCHEDULE = [25, 50, 100, 200];
 const HEALTH_POLL_INTERVAL = 500;
 const HEALTH_TIMEOUT = 45_000;
+
+// One-time warmup budget for the first real snapshot (issue #15). The first
+// app.snapshot() after server boot pays AX/testmanagerd setup cost — observed
+// >30s on a heavy WebKit.WebContent tree — so the 30s per-request timeout
+// cannot cover it. Pay that cost here, once, before the device is registered.
+const WARMUP_TIMEOUT = 60_000;
 
 // Source form (src/server/) is two levels above drivers/; bundled form (bin/) is one.
 function resolveProjectRoot(moduleDir: string): string {
@@ -129,8 +135,9 @@ async function bootstrapAndroid(deviceId: string): Promise<void> {
       { stdout: "ignore", stderr: "ignore" },
     );
 
-    // Health poll
+    // Health poll, then a real snapshot so the first user call is warm
     await healthPoll(port, serverProcess);
+    await warmup(port, authToken);
 
     // Register
     setDevice({
@@ -237,8 +244,9 @@ async function bootstrapIOS(deviceId: string, deviceType: DeviceType): Promise<v
       tunnelProcess = result.tunnelProcess;
     }
 
-    // Health poll
+    // Health poll, then a real snapshot so the first user call is warm
     await healthPoll(port, serverProcess);
+    await warmup(port, authToken);
 
     // Register
     setDevice({
@@ -314,12 +322,15 @@ async function bootstrapIOSSimulator(deviceId: string, port: number, authToken: 
     throw new Error("Could not get app container path after install");
   }
 
-  // Spawn the runner binary inside the simulator (no foreground, no SpringBoard)
-  return spawn(
+  // Spawn the runner binary inside the simulator (no foreground, no SpringBoard).
+  // stdout/stderr are piped to a log file instead of ignored: the on-device
+  // server writes diagnostics there (issue #15 — an empty 500 body from the
+  // device server used to leave no trace anywhere).
+  const serverProcess = spawn(
     ["xcrun", "simctl", "spawn", deviceId, join(containerPath, binaryName)],
     {
-      stdout: "ignore",
-      stderr: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
       env: {
         ...process.env,
         SIMCTL_CHILD_PORT: String(port),
@@ -327,6 +338,43 @@ async function bootstrapIOSSimulator(deviceId: string, port: number, authToken: 
       },
     },
   );
+  // Log location mirrors the port-lock dir (~/.mdms/) rather than tmpdir():
+  // MCP hosts may scrub TMPDIR from our environment, making os.tmpdir()
+  // resolve differently than the user's shell (issue #15 debugging hazard).
+  const logDir = join(homedir(), ".mdms", "logs");
+  mkdirSync(logDir, { recursive: true, mode: 0o700 });
+  teeProcessOutput(serverProcess, join(logDir, `ios-${port}.log`));
+  return serverProcess;
+}
+
+/// Pump a long-lived child process's stdout/stderr into a log file.
+/// The writer closes itself when the process dies and both streams EOF.
+function teeProcessOutput(proc: Subproc, logPath: string): void {
+  const writer = createWriteStream(logPath, { flags: "w" });
+  const streams = [proc.stdout, proc.stderr].filter(
+    (s): s is ReadableStream<Uint8Array> => s !== null,
+  );
+  if (streams.length === 0) {
+    writer.end();
+    return;
+  }
+  let open = streams.length;
+  for (const stream of streams) {
+    void (async () => {
+      const reader = stream.getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          writer.write(value);
+        }
+      } catch {
+        // Process killed mid-stream — nothing more to log.
+      } finally {
+        if (--open === 0) writer.end();
+      }
+    })();
+  }
 }
 
 // ── iOS real device: xcodebuild (still required for testmanagerd handshake) ──
@@ -392,4 +440,30 @@ async function healthPoll(port: number, serverProcess: Subproc): Promise<void> {
   // Timeout: kill and throw
   try { serverProcess.kill(9); } catch { /* */ }
   throw new Error(`Health check timed out after ${HEALTH_TIMEOUT}ms on port ${port}`);
+}
+
+// ── Warmup ──
+
+/// Issue one real authenticated snapshot request before registering the
+/// device (issue #15). Without this, the first user-facing call pays the
+/// cold-snapshot cost and can exceed the 30s request timeout; the aborted
+/// request then poisons the next one (observed: timeout → empty 500 → OK).
+/// A failure here fails bootstrap so the caller retries with a fresh server.
+async function warmup(port: number, authToken: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`http://127.0.0.1:${port}/uitree`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+      signal: AbortSignal.timeout(WARMUP_TIMEOUT),
+    });
+  } catch (err) {
+    throw new Error(
+      `Driver warmup failed: GET /uitree did not complete within ${WARMUP_TIMEOUT / 1000}s (${(err as Error).message})`,
+    );
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Driver warmup failed: GET /uitree → ${res.status} ${body.slice(0, 200)}`);
+  }
+  await res.text(); // drain the body so the connection is released
 }

@@ -638,17 +638,39 @@ describe("healthPoll", () => {
     spawnSpy = spyOn(Bun, "spawn").mockImplementation(androidSpawnMock("health-retry"));
     processKillSpy = spyOn(process, "kill").mockImplementation(() => true);
 
-    let fetchCount = 0;
-    fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async () => {
-      fetchCount++;
-      if (fetchCount < 3) throw new Error("ECONNREFUSED");
+    let healthCount = 0;
+    let warmupCount = 0;
+    fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
+      if (String(url).endsWith("/uitree")) {
+        warmupCount++;
+        return new Response("{}", { status: 200 });
+      }
+      healthCount++;
+      if (healthCount < 3) throw new Error("ECONNREFUSED");
       return new Response("OK", { status: 200 });
     });
     sleepSpy = spyOn(Bun, "sleep").mockImplementation(() => Promise.resolve());
 
     const dev = await ensureDevice("health-retry");
     expect(dev.id).toBe("health-retry");
-    expect(fetchCount).toBe(3);
+    expect(healthCount).toBe(3);
+    // Warmup issues one real snapshot before the device is registered (issue #15)
+    expect(warmupCount).toBe(1);
+  });
+
+  test("fails bootstrap when warmup fails", async () => {
+    spawnSpy = spyOn(Bun, "spawn").mockImplementation(androidSpawnMock("warmup-fail"));
+    processKillSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+    fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
+      if (String(url).endsWith("/uitree")) {
+        return new Response("boom", { status: 500 });
+      }
+      return new Response("OK", { status: 200 });
+    });
+    sleepSpy = spyOn(Bun, "sleep").mockImplementation(() => Promise.resolve());
+
+    await expect(ensureDevice("warmup-fail")).rejects.toThrow(/warmup/i);
   });
 
   test("throws when server process dies during health poll", async () => {
