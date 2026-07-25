@@ -18,7 +18,7 @@ Devices are bootstrapped on first use — the server installs the driver app, al
 |------|-------------|
 | `list_devices` | List available iOS and Android devices |
 | `screenshot` | Capture the device screen (JPEG) |
-| `uitree` | Get the UI element tree as a flat list, with optional search and limit |
+| `uitree` | Get the UI element tree as a flat list, with optional search and limit. Off-screen elements are excluded unless `include_invisible: true` |
 | `tap` | Tap at screen coordinates |
 | `double_tap` | Double-tap at screen coordinates |
 | `long_press` | Long-press at screen coordinates (configurable duration) |

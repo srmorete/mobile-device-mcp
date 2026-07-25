@@ -11,6 +11,16 @@ final class UITreeServer: XCTestCase {
         let server = try HTTPServer(address: .inet(ip4: "127.0.0.1", port: port))
 
         AppManager.installQuiescenceBypass()
+        // Activate the bypass server-wide, not just during run_code (issue #15):
+        // snapshotting a busy app (e.g. Safari's WebKit.WebContent on an animated
+        // page) blocks in quiescence waits for 60s+ on a cold AX channel, which
+        // outlives the host's 30s request timeout and wedges the first calls of
+        // every session. JsEngine's own increment/decrement still composes.
+        // Note: this does NOT change run_code semantics — exec already wrapped
+        // every script in increment/decrement, so _waitForExistence/_waitForHittable
+        // short-circuited during scripts all along. What changes: native tool
+        // calls (tap, uitree, ...) also skip those waits now.
+        AppManager.skipQuiescence.increment()
         let extractor = UITreeExtractor()
         let interactions = Interactions(extractor: extractor)
         let appManager = AppManager()
@@ -55,8 +65,12 @@ final class UITreeServer: XCTestCase {
         await server.appendRoute("GET /uitree") { request in
             if let deny = checkAuth(request) { return deny }
             return await Self.exceptionGuard {
+                let started = Date()
+                Self.log("GET /uitree: start")
                 let tree = try extractor.captureUITree()
                 let json = try JSONSerialization.data(withJSONObject: tree, options: [])
+                let elapsed = String(format: "%.2f", Date().timeIntervalSince(started))
+                Self.log("GET /uitree: done in \(elapsed)s, \(json.count) bytes")
                 return HTTPResponse(
                     statusCode: .ok,
                     headers: [.contentType: "application/json"],
@@ -252,11 +266,20 @@ final class UITreeServer: XCTestCase {
             return try await handler()
         } catch {
             let reason = (error as NSError).localizedDescription
+            // stderr lands in the host-side log file (mdms-ios-<port>.log) — an
+            // otherwise empty 500 body leaves no trace (issue #15).
+            Self.log("500: \(reason)")
             return HTTPResponse(
                 statusCode: .internalServerError,
                 body: Data(reason.utf8)
             )
         }
+    }
+
+    /// Unbuffered stderr log. NSLog only reaches the simulator system log,
+    /// which the host-side log file never sees.
+    static func log(_ message: String) {
+        FileHandle.standardError.write(Data("[UITreeServer] \(message)\n".utf8))
     }
 
     /// Wraps a synchronous block that may throw ObjC NSExceptions (which Swift do/catch cannot catch).

@@ -8,21 +8,26 @@ import type {
 
 // --- 5.3 Type Mapping ---
 
+// Public XCUIElementType numbering (XCUIAutomation/XCUIElementTypes.h).
+// The raw `elementType` in XCUIElementSnapshot.dictionaryRepresentation uses
+// these values. Issue #12: the previous map was shifted (48→input is actually
+// StaticText, 42→image is actually Link, 45 SearchField was unmapped), which
+// mislabeled types and, since clickable derives from the mapped type, flags.
 const IOS_ELEMENT_TYPE_MAP: Record<number, string> = {
-  8: "button",
-  9: "button",
-  11: "checkbox",
-  32: "slider",
-  37: "picker",
-  39: "switch",
-  41: "link",
-  42: "image",
-  44: "input",
-  47: "text",
-  48: "input",
-  49: "input",
-  51: "input",
-  57: "webview",
+  9: "button", // XCUIElementTypeButton
+  12: "checkbox", // XCUIElementTypeCheckBox
+  33: "slider", // XCUIElementTypeSlider
+  38: "picker", // XCUIElementTypePicker
+  40: "switch", // XCUIElementTypeSwitch
+  41: "switch", // XCUIElementTypeToggle
+  42: "link", // XCUIElementTypeLink
+  43: "image", // XCUIElementTypeImage
+  45: "input", // XCUIElementTypeSearchField
+  48: "text", // XCUIElementTypeStaticText
+  49: "input", // XCUIElementTypeTextField
+  50: "input", // XCUIElementTypeSecureTextField
+  52: "input", // XCUIElementTypeTextView
+  58: "webview", // XCUIElementTypeWebView
 };
 
 const WEBVIEW_CLASS_MAP: Record<string, string> = {
@@ -123,7 +128,10 @@ function isIOSFormat(nodes: unknown[]): boolean {
 // --- 5.2 iOS Normalization ---
 
 const IOS_INPUT_TYPES = new Set(["input"]);
-const IOS_CLICKABLE_TYPES = new Set(["button", "link", "input"]);
+// Interactive control types — without these, a labeled switch/checkbox was
+// reported clickable:false and an unlabeled one was dropped from the tree
+// entirely (code review follow-up to issue #12).
+const IOS_CLICKABLE_TYPES = new Set(["button", "link", "input", "switch", "checkbox", "slider", "picker"]);
 
 function normalizeIOSNode(node: IOSNode): AndroidNode {
   const unifiedType = IOS_ELEMENT_TYPE_MAP[node.elementType] ?? "other";
@@ -235,11 +243,15 @@ function flattenTree(
             bounds: { left: b.left, top: b.top, right: b.right, bottom: b.bottom },
             center: { x: Math.round(centerX), y: Math.round(centerY) },
             type: resolveType(node.className),
+            // Intersection with the screen rect, not center-inside: a giant
+            // container (e.g. a full web page) has an off-screen center but is
+            // partly on screen, and a half-visible edge element counts too
+            // (issue #13).
             visible:
-              centerX >= 0 &&
-              centerX <= ctx.screenWidth &&
-              centerY >= 0 &&
-              centerY <= ctx.screenHeight,
+              b.left < ctx.screenWidth &&
+              b.right > 0 &&
+              b.top < ctx.screenHeight &&
+              b.bottom > 0,
             clickable,
           });
           idCounter.value++;
@@ -355,13 +367,67 @@ function reassignIds(elements: FilteredElement[]): FilteredElement[] {
   return elements;
 }
 
+// --- 5.8 Search ranking (issue #14) ---
+
+function boundsArea(b: Bounds): number {
+  return (b.right - b.left) * (b.bottom - b.top);
+}
+
+/// Rank search results leaf-oriented: visible before invisible, matches that
+/// contain another match (containers, e.g. a web page root) after leaves, and
+/// smaller area first for the same match quality. Stable within each tier.
+export function rankSearchResults(elements: FilteredElement[]): FilteredElement[] {
+  const containsOther = new Set<number>();
+  for (let i = 0; i < elements.length; i++) {
+    for (let j = 0; j < elements.length; j++) {
+      if (i === j) continue;
+      // Strict containment: equal bounds means duplicates, not container/leaf
+      if (
+        boundsContain(elements[i].bounds, elements[j].bounds) &&
+        boundsArea(elements[i].bounds) > boundsArea(elements[j].bounds)
+      ) {
+        containsOther.add(i);
+        break;
+      }
+    }
+  }
+  return elements
+    .map((el, idx) => ({ el, idx }))
+    .sort((a, b) => {
+      const visA = a.el.visible ? 0 : 1;
+      const visB = b.el.visible ? 0 : 1;
+      if (visA !== visB) return visA - visB;
+      const conA = containsOther.has(a.idx) ? 1 : 0;
+      const conB = containsOther.has(b.idx) ? 1 : 0;
+      if (conA !== conB) return conA - conB;
+      const areaDiff = boundsArea(a.el.bounds) - boundsArea(b.el.bounds);
+      if (areaDiff !== 0) return areaDiff;
+      return a.idx - b.idx; // stable
+    })
+    .map(({ el }) => el);
+}
+
 // --- Main export ---
 
-export function filterUITree(input: RawUITree): FilteredElement[] {
+export interface FilterOptions {
+  /// Include off-screen elements (default false — issue #13).
+  includeInvisible?: boolean;
+}
+
+export function filterUITree(input: RawUITree, options: FilterOptions = {}): FilteredElement[] {
   // 5.1: Validate required fields
   if (input.screenWidth == null || input.screenHeight == null || !Array.isArray(input.nodes)) {
     throw new Error(
       "Invalid UI tree: missing required fields (screenWidth, screenHeight, nodes)",
+    );
+  }
+
+  // Zero/negative screen dimensions would mark every element invisible, and
+  // since off-screen elements are excluded by default the tool would return
+  // an empty tree with no error anywhere in the chain. Fail loudly instead.
+  if (input.screenWidth <= 0 || input.screenHeight <= 0) {
+    throw new Error(
+      `Invalid UI tree: non-positive screen dimensions (${input.screenWidth}x${input.screenHeight})`,
     );
   }
 
@@ -383,8 +449,12 @@ export function filterUITree(input: RawUITree): FilteredElement[] {
   const flat: FilteredElement[] = [];
   flattenTree(androidNodes, ctx, flat, { value: 1 });
 
+  // Issue #13: off-screen elements are excluded by default, before dedup so
+  // they can't act as text-hoisting sources or containment-dedup casualties.
+  const onscreen = options.includeInvisible ? flat : flat.filter((el) => el.visible);
+
   // 5.7: Deduplication
-  let result = exactDedup(flat);
+  let result = exactDedup(onscreen);
   result = textHoisting(result);
   result = containmentDedup(result);
   result = reassignIds(result);

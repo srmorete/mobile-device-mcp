@@ -5,7 +5,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { discoverDevices, detectPlatform, getDevice, runCommand } from "./devices.js";
 import { proxyGet, proxyGetBinary, proxyPost, proxyPostBody } from "./proxy.js";
 import { ensureDevice } from "./bootstrap.js";
-import { filterUITree } from "../filter/filter.js";
+import { filterUITree, rankSearchResults } from "../filter/filter.js";
 import type { FilteredElement } from "../filter/types.js";
 
 function textResult(text: string): CallToolResult {
@@ -185,25 +185,33 @@ export function registerTools(server: McpServer): void {
   // ── 2.2.9 uitree ──
   server.tool(
     "uitree",
-    "Returns the UI element tree of the device screen",
+    "Returns the UI element tree of the device screen. Off-screen elements are excluded by default; pass include_invisible: true to keep them. With search, results are ranked leaf-first (visible, non-container, smaller area).",
+
     {
       device_id: z.string().regex(/^[\w\-.:]{1,256}$/),
       search: z.string().optional(),
       limit: z.number().int().min(1).optional(),
+      include_invisible: z.boolean().optional(),
     },
-    async ({ device_id, search, limit }) => {
+    async ({ device_id, search, limit, include_invisible }) => {
       try {
         // 1. GET /uitree and parse
         const rawJson = await proxyGet(device_id, "/uitree");
         const rawTree = JSON.parse(rawJson);
 
-        // 2. Filter through UI tree filter
-        let elements: FilteredElement[] = filterUITree(rawTree);
+        // 2. Filter through UI tree filter (off-screen excluded by default, issue #13)
+        let elements: FilteredElement[] = filterUITree(rawTree, {
+          includeInvisible: include_invisible ?? false,
+        });
 
-        // 3. Search: case-insensitive substring on text
+        // 3. Search: case-insensitive substring on text.
+        // Ranked leaf-oriented: visible first, containers that contain other
+        // matches last, smaller area first (issue #14).
         if (search) {
           const lower = search.toLowerCase();
-          elements = elements.filter((el) => (el.text ?? "").toLowerCase().includes(lower));
+          elements = rankSearchResults(
+            elements.filter((el) => (el.text ?? "").toLowerCase().includes(lower)),
+          );
         }
 
         // 4. Limit
