@@ -3,7 +3,7 @@
   "name": "io.github.srmorete/mobile-device-mcp",
   "title": "Mobile Device MCP",
   "description": "Control iOS and Android devices with multi-device and seamless Native/WebView support.",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "repository": {
     "url": "https://github.com/srmorete/mobile-device-mcp",
     "source": "github"
@@ -12,7 +12,7 @@
     {
       "registryType": "npm",
       "identifier": "@srmorete/mobile-device-mcp",
-      "version": "0.1.8",
+      "version": "0.1.9",
       "registryBaseUrl": "https://registry.npmjs.org",
       "runtimeHint": "npx",
       "transport": {
