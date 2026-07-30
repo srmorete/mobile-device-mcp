@@ -1,6 +1,6 @@
-import { unlinkSync } from "fs";
+import { mkdtempSync, readFileSync, rmSync, unlinkSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { homedir, tmpdir } from "os";
 import type { RegisteredDevice, DiscoveredDevice, Platform, DeviceType } from "./types.js";
 import { spawn } from "./proc.js";
 
@@ -93,9 +93,24 @@ async function discoverIOSSimulators(): Promise<DiscoveredDevice[]> {
   return devices;
 }
 
+async function listIOSRealDevicesJson(): Promise<any> {
+  // devicectl writes JSON only to the --json-output path; stdout is human text
+  // (e.g. "No devices found."). Using /dev/stdout therefore fails JSON.parse
+  // with "Unexpected non-whitespace character after JSON". Always use a temp file.
+  const dir = mkdtempSync(join(tmpdir(), "mdms-devicectl-"));
+  const jsonPath = join(dir, "devices.json");
+  try {
+    await runCommand(["xcrun", "devicectl", "list", "devices", "--json-output", jsonPath]);
+    return JSON.parse(readFileSync(jsonPath, "utf-8"));
+  } finally {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch { /* best-effort cleanup */ }
+  }
+}
+
 async function discoverIOSRealDevices(): Promise<DiscoveredDevice[]> {
-  const output = await runCommand(["xcrun", "devicectl", "list", "devices", "--json-output", "/dev/stdout"]);
-  const json = JSON.parse(output);
+  const json = await listIOSRealDevicesJson();
   const devices: DiscoveredDevice[] = [];
   const result = json.result?.devices || [];
   for (const device of result) {
@@ -168,8 +183,7 @@ export async function detectPlatform(deviceId: string): Promise<DetectedPlatform
 
   // Check iOS real devices
   try {
-    const output = await runCommand(["xcrun", "devicectl", "list", "devices", "--json-output", "/dev/stdout"]);
-    const json = JSON.parse(output);
+    const json = await listIOSRealDevicesJson();
     const result = json.result?.devices || [];
     for (const device of result) {
       if (device.identifier === deviceId) {

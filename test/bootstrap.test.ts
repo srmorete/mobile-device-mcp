@@ -24,6 +24,19 @@ function mockSubprocess(stdout: string, exitCode: number | null = 0) {
   } as any;
 }
 
+// devicectl writes JSON only to --json-output; mocks must do the same.
+function mockDevicectl(cmd: string[], json: unknown, exitCode: number | null = 0) {
+  const flagIdx = cmd.indexOf("--json-output");
+  const jsonPath = flagIdx >= 0 ? cmd[flagIdx + 1] : undefined;
+  if (jsonPath && jsonPath !== "/dev/stdout") {
+    writeFileSync(jsonPath, JSON.stringify(json));
+  }
+  return mockSubprocess(
+    jsonPath === "/dev/stdout" ? JSON.stringify(json) : "No devices found.\n",
+    exitCode,
+  );
+}
+
 function mockServerProcess() {
   return {
     stdout: null,
@@ -80,15 +93,15 @@ function iosSpawnMock(deviceId: string, deviceType: "simulator" | "device") {
     // devicectl list
     if (args.includes("devicectl") && args.includes("list")) {
       if (deviceType === "device") {
-        return mockSubprocess(JSON.stringify({
+        return mockDevicectl(cmd as string[], {
           result: {
             devices: [
               { identifier: deviceId, connectionProperties: { transportType: "wired" } },
             ],
           },
-        }));
+        });
       }
-      return mockSubprocess(JSON.stringify({ result: { devices: [] } }));
+      return mockDevicectl(cmd as string[], { result: { devices: [] } });
     }
     // lsof (for isPortListening in allocateIOSPort)
     if (args.includes("lsof")) {
@@ -443,13 +456,13 @@ describe("bootstrapIOS", () => {
         return mockSubprocess(JSON.stringify({ devices: {} }));
       }
       if (args.includes("devicectl")) {
-        return mockSubprocess(JSON.stringify({
+        return mockDevicectl(cmd as string[], {
           result: {
             devices: [
               { identifier: "ios-fail", connectionProperties: { transportType: "wired" } },
             ],
           },
-        }));
+        });
       }
       if (args.includes("lsof")) return mockSubprocess("");
       if (args.includes("xcodebuild")) {
@@ -523,13 +536,13 @@ describe("bootstrapIOS", () => {
         return mockSubprocess(JSON.stringify({ devices: {} }));
       }
       if (args.includes("devicectl")) {
-        return mockSubprocess(JSON.stringify({
+        return mockDevicectl(cmd as string[], {
           result: {
             devices: [
               { identifier: "no-driver-dev", connectionProperties: { transportType: "wired" } },
             ],
           },
-        }));
+        });
       }
       if (args.includes("lsof")) return mockSubprocess("");
       return mockSubprocess("");

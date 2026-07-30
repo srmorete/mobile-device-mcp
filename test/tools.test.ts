@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll, beforeEach, spyOn } from "bun:test";
 import type { Server } from "bun";
+import { writeFileSync } from "fs";
 import { setDevice, removeDevice } from "../src/server/devices";
 
 const FAKE_TOKEN = "tools-test-token";
@@ -248,10 +249,25 @@ describe("run_code", () => {
 describe("list_devices", () => {
   test("returns devices and errors fields", async () => {
     const spawn = spyOn(Bun, "spawn").mockImplementation((cmd: any) => {
-      const args = (cmd as string[]).join(" ");
-      // Return valid empty JSON for simctl/devicectl so they don't error on parse
-      const stdout = args.includes("simctl") || args.includes("devicectl")
-        ? JSON.stringify({ devices: {}, result: { devices: [] } })
+      const args = cmd as string[];
+      const joined = args.join(" ");
+      // simctl still emits JSON on stdout; devicectl writes JSON to --json-output.
+      if (joined.includes("devicectl")) {
+        const flagIdx = args.indexOf("--json-output");
+        const jsonPath = flagIdx >= 0 ? args[flagIdx + 1] : undefined;
+        const json = JSON.stringify({ result: { devices: [] } });
+        if (jsonPath && jsonPath !== "/dev/stdout") writeFileSync(jsonPath, json);
+        return {
+          stdout: new Response(jsonPath === "/dev/stdout" ? json : "No devices found.\n").body,
+          stderr: new Response("").body,
+          exited: Promise.resolve(0),
+          exitCode: 0,
+          pid: 1,
+          kill: () => {},
+        } as any;
+      }
+      const stdout = joined.includes("simctl")
+        ? JSON.stringify({ devices: {} })
         : "List of devices attached\n";
       return {
         stdout: new Response(stdout).body,

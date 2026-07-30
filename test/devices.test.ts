@@ -91,6 +91,19 @@ function mockSubprocess(stdout: string, exitCode = 0) {
   } as any;
 }
 
+// devicectl writes JSON only to --json-output; mocks must do the same.
+function mockDevicectl(cmd: string[], json: unknown, exitCode = 0) {
+  const flagIdx = cmd.indexOf("--json-output");
+  const jsonPath = flagIdx >= 0 ? cmd[flagIdx + 1] : undefined;
+  if (jsonPath && jsonPath !== "/dev/stdout") {
+    writeFileSync(jsonPath, JSON.stringify(json));
+  }
+  return mockSubprocess(
+    jsonPath === "/dev/stdout" ? JSON.stringify(json) : "No devices found.\n",
+    exitCode,
+  );
+}
+
 // --- Discovery ---
 
 describe("discoverDevices", () => {
@@ -112,14 +125,14 @@ describe("discoverDevices", () => {
         }));
       }
       if (args.includes("devicectl") && args.includes("list")) {
-        return mockSubprocess(JSON.stringify({
+        return mockDevicectl(cmd as string[], {
           result: {
             devices: [
               { identifier: "DEV-001", deviceProperties: { name: "iPhone 13" }, connectionProperties: { transportType: "wired" } },
               { identifier: "DEV-002", deviceProperties: { name: "iPhone 12" }, connectionProperties: { transportType: "network" } },
             ],
           },
-        }));
+        });
       }
       return mockSubprocess("");
     });
@@ -187,7 +200,13 @@ describe("discoverDevices", () => {
       if (args.includes("adb") && args.includes("devices")) {
         return mockSubprocess("List of devices attached\n192.168.1.5:5555\tdevice\n");
       }
-      return mockSubprocess("{}");
+      if (args.includes("simctl")) {
+        return mockSubprocess(JSON.stringify({ devices: {} }));
+      }
+      if (args.includes("devicectl")) {
+        return mockDevicectl(cmd as string[], { result: { devices: [] } });
+      }
+      return mockSubprocess("");
     });
     const { devices } = await discoverDevices();
     const d = devices.find((d) => d.id === "192.168.1.5:5555");
@@ -206,13 +225,13 @@ describe("discoverDevices", () => {
         return mockSubprocess(JSON.stringify({ devices: {} }));
       }
       if (args.includes("devicectl")) {
-        return mockSubprocess(JSON.stringify({
+        return mockDevicectl(cmd as string[], {
           result: {
             devices: [
               { identifier: "NO-NAME", connectionProperties: { transportType: "wired" } },
             ],
           },
-        }));
+        });
       }
       return mockSubprocess("");
     });
@@ -253,7 +272,10 @@ describe("detectPlatform", () => {
           },
         }));
       }
-      return mockSubprocess(JSON.stringify({ result: { devices: [] } }));
+      if (args.includes("devicectl")) {
+        return mockDevicectl(cmd as string[], { result: { devices: [] } });
+      }
+      return mockSubprocess("");
     });
     const result = await detectPlatform("SIM-XYZ");
     expect(result).toEqual({ platform: "ios", deviceType: "simulator" });
@@ -270,7 +292,7 @@ describe("detectPlatform", () => {
         return mockSubprocess(JSON.stringify({ devices: {} }));
       }
       if (args.includes("devicectl")) {
-        return mockSubprocess(JSON.stringify({
+        return mockDevicectl(cmd as string[], {
           result: {
             devices: [
               // Non-matching device first so the for-loop continues past closing }
@@ -278,7 +300,7 @@ describe("detectPlatform", () => {
               { identifier: "DEV-ABC", connectionProperties: { transportType: "wired" } },
             ],
           },
-        }));
+        });
       }
       return mockSubprocess("");
     });
@@ -297,7 +319,7 @@ describe("detectPlatform", () => {
         return mockSubprocess(JSON.stringify({ devices: {} }));
       }
       if (args.includes("devicectl")) {
-        return mockSubprocess(JSON.stringify({ result: { devices: [] } }));
+        return mockDevicectl(cmd as string[], { result: { devices: [] } });
       }
       return mockSubprocess("");
     });
@@ -314,7 +336,10 @@ describe("detectPlatform", () => {
           devices: { "runtime": [{ udid: "SIM-1", state: "Booted" }] },
         }));
       }
-      return mockSubprocess(JSON.stringify({ result: { devices: [] } }));
+      if (args.includes("devicectl")) {
+        return mockDevicectl(cmd as string[], { result: { devices: [] } });
+      }
+      return mockSubprocess("");
     });
     const result = await detectPlatform("SIM-1");
     expect(result.platform).toBe("ios");
@@ -327,13 +352,13 @@ describe("detectPlatform", () => {
       if (args.includes("adb devices")) return mockSubprocess("List of devices attached\n");
       if (args.includes("simctl")) throw new Error("simctl not found");
       if (args.includes("devicectl")) {
-        return mockSubprocess(JSON.stringify({
+        return mockDevicectl(cmd as string[], {
           result: {
             devices: [
               { identifier: "DEV-Z", connectionProperties: { transportType: "wired" } },
             ],
           },
-        }));
+        });
       }
       return mockSubprocess("");
     });
