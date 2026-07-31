@@ -259,8 +259,34 @@ final class UITreeServer: XCTestCase {
             }
         }
 
-        // Block indefinitely -- the server runs as a long-lived service
-        try await server.start()
+        // POST /shutdown — process-lifecycle only (MCP cleanup calls this; not an
+        // MCP tool). Stops FlyingFox so testStartServer returns and XCTest can
+        // tear down cleanly. Instant SIGTERM on xcodebuild interrupts the build
+        // and has crashed SpringBoard inside XCTAutomationSupport.
+        await server.appendRoute("POST /shutdown") { request in
+            if let deny = checkAuth(request) { return deny }
+            // Drain in-flight work first (same serial queue as the rest of the
+            // API). Stop the listener off the request path so we don't deadlock
+            // waiting on the connection that is still writing this response.
+            return await Self.exceptionGuard {
+                Self.log("POST /shutdown: stopping server")
+                Task {
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    await server.stop(timeout: 0.5)
+                }
+                return HTTPResponse(statusCode: .ok, body: Data("OK".utf8))
+            }
+        }
+
+        // Runs until POST /shutdown (or the host kills the session).
+        // FlyingFox's stop() closes the listen socket underneath run()/start(),
+        // which surface a kqueue EBADF — treat that as a normal shutdown.
+        do {
+            try await server.run()
+        } catch {
+            Self.log("HTTP server stopped: \(error.localizedDescription)")
+        }
+        Self.log("testStartServer exiting actively so XCTest can tear down")
     }
 
     // MARK: - Helpers

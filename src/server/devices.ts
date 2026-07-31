@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, unlinkSync } from "fs";
 import { join } from "path";
 import { homedir, tmpdir } from "os";
 import type { RegisteredDevice, DiscoveredDevice, Platform, DeviceType } from "./types.js";
-import { spawn } from "./proc.js";
+import { killProcessTree, sleep, spawn, stopProcessTree } from "./proc.js";
 
 const LOCK_DIR = join(homedir(), ".mdms", "ports");
 
@@ -200,29 +200,86 @@ export async function detectPlatform(deviceId: string): Promise<DetectedPlatform
 
 // ── Cleanup ──
 
-export async function cleanupDevice(device: RegisteredDevice): Promise<void> {
-  // Kill server process (SIGKILL, try process group first)
+// Hosts that close an MCP stdio child typically: end stdin → wait ~2s →
+// SIGTERM → wait ~2s → SIGKILL (MCP SDK StdioClientTransport). We start
+// teardown on stdin EOF when possible so the full wait budget is available.
+//
+// iOS: hard-killing / SIGTERM-ing xcodebuild interrupts the UITest session and
+// has crashed SpringBoard inside XCTAutomationSupport. Ask the on-device
+// HTTP server to stop cleanly first (POST /shutdown) so XCTest tears down,
+// then wait for the xcodebuild process to exit, and only then escalate.
+const IOS_SHUTDOWN_HTTP_MS = 500;
+// Host budget after stdin EOF is typically ~4s before SIGKILL of this process
+// (SDK: 2s idle + SIGTERM + 2s). Keep the iOS wait inside that window.
+const IOS_STOP_GRACE_MS = 3_000;
+const ANDROID_STOP_GRACE_MS = 1_000;
+// After a clean xcodebuild exit, brief settle for SpringBoard automation detach.
+const IOS_POST_STOP_SETTLE_MS = 150;
+
+/** Best-effort: ask the on-device server to stop its HTTP loop (iOS only). */
+async function requestIOSServerShutdown(device: RegisteredDevice): Promise<boolean> {
+  if (device.serverProcess.exitCode !== null) return true;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), IOS_SHUTDOWN_HTTP_MS);
   try {
-    if (device.serverProcess.pid && device.serverProcess.pid > 0) {
-      process.kill(-device.serverProcess.pid, "SIGKILL");
-    }
+    const res = await fetch(`http://127.0.0.1:${device.port}/shutdown`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${device.authToken}`,
+        Host: "127.0.0.1",
+      },
+      signal: controller.signal,
+    });
+    return res.ok;
   } catch {
-    try {
-      device.serverProcess.kill(9);
-    } catch { /* already dead */ }
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Wait for a process to exit, up to `ms`. Returns true if it exited. */
+async function waitForExit(proc: { exitCode: number | null; exited: Promise<number> }, ms: number): Promise<boolean> {
+  if (proc.exitCode !== null) return true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      proc.exited.then(() => undefined),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+  return proc.exitCode !== null;
+}
+
+export async function cleanupDevice(device: RegisteredDevice): Promise<void> {
+  if (device.platform === "ios") {
+    // 1) Ask the runner to stop FlyingFox → testStartServer returns → XCTest teardown.
+    const shutdownOk = await requestIOSServerShutdown(device);
+    // 2) Give xcodebuild time to fully exit after the test ends (Tear Down +
+    // xcodebuild bookkeeping). Prefer waiting over signalling: SIGTERM still
+    // prints BUILD INTERRUPTED and is the path that crashed SpringBoard.
+    const exited = await waitForExit(device.serverProcess, IOS_STOP_GRACE_MS);
+    // 3) Last resort only when /shutdown never took and the tree is wedged.
+    if (!exited) {
+      console.error(
+        `[mobile-device-mcp] iOS server did not exit after /shutdown` +
+          `(ok=${shutdownOk}); escalating signals for device ${device.id}`,
+      );
+      await stopProcessTree(device.serverProcess, { graceMs: 200 });
+    }
+  } else {
+    // Android instrumentation has no SpringBoard-equivalent attach hazard;
+    // SIGTERM → wait → SIGKILL is enough, then force-stop below.
+    await stopProcessTree(device.serverProcess, { graceMs: ANDROID_STOP_GRACE_MS });
   }
 
-  // Kill tunnel process if present (iOS real devices)
+  // Auto-dispose tunnel — iproxy has no session to tear down.
   if (device.tunnelProcess) {
-    try {
-      if (device.tunnelProcess.pid && device.tunnelProcess.pid > 0) {
-        process.kill(-device.tunnelProcess.pid, "SIGKILL");
-      }
-    } catch {
-      try {
-        device.tunnelProcess.kill(9);
-      } catch { /* already dead */ }
-    }
+    killProcessTree(device.tunnelProcess);
   }
 
   // Platform-specific cleanup
@@ -273,6 +330,10 @@ export async function cleanupDevice(device: RegisteredDevice): Promise<void> {
     try {
       unlinkSync(join(LOCK_DIR, String(device.port)));
     } catch { /* file may not exist */ }
+    // Brief settle so SpringBoard can finish tearing down the automation
+    // session after xcodebuild/UITest exit. Host-agnostic: any MCP client that
+    // closes stdio benefits; this is process-lifecycle cleanup, not a tool.
+    await sleep(IOS_POST_STOP_SETTLE_MS);
   }
 }
 

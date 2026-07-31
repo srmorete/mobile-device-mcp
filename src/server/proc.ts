@@ -98,15 +98,59 @@ export function nodeAdapter(cmd: string[], options: SpawnOptions = {}): Subproc 
   };
 }
 
-/// SIGKILL the whole process group (spawn() makes children group leaders so
-/// grandchildren — the test runner under xcodebuild, instrumentation under
-/// adb — die with the handle). Falls back to killing just the process.
-export function killProcessTree(proc: Subproc): void {
+/// Deliver `signal` to the whole process group when possible (spawn() makes
+/// children group leaders so grandchildren — the test runner under xcodebuild,
+/// instrumentation under adb — receive it). Falls back to the process handle.
+export function signalProcessTree(proc: Subproc, signal: NodeJS.Signals | number): void {
   try {
     if (proc.pid && proc.pid > 0) {
-      process.kill(-proc.pid, "SIGKILL");
+      process.kill(-proc.pid, signal);
       return;
     }
-  } catch { /* group kill failed — try the handle */ }
-  try { proc.kill(9); } catch { /* already dead */ }
+  } catch { /* group signal failed — try the handle */ }
+  try { proc.kill(signal); } catch { /* already dead */ }
+}
+
+/// SIGKILL the whole process group. Prefer {@link stopProcessTree} when the
+/// child deserves a chance to exit cleanly (iOS xcodebuild must detach
+/// XCTest automation from SpringBoard before it dies).
+export function killProcessTree(proc: Subproc): void {
+  signalProcessTree(proc, "SIGKILL");
+}
+
+/** Default wait after SIGTERM before escalating to SIGKILL. */
+export const PROCESS_STOP_GRACE_MS = 2_000;
+
+/// Ask the process group to exit (SIGTERM), wait up to `graceMs` for a clean
+/// exit, then SIGKILL if it is still alive. Twin of MCP SDK transport close
+/// (stdin end → SIGTERM → SIGKILL): hard-killing xcodebuild mid-session has
+/// been observed to crash SpringBoard inside XCTAutomationSupport.
+export async function stopProcessTree(
+  proc: Subproc,
+  options?: { graceMs?: number },
+): Promise<void> {
+  if (proc.exitCode !== null) return;
+
+  const graceMs = options?.graceMs ?? PROCESS_STOP_GRACE_MS;
+  signalProcessTree(proc, "SIGTERM");
+
+  if (proc.exitCode !== null) return;
+
+  // `exited` stays pending until the child dies. Race it against the grace
+  // window so a stubborn child cannot block MCP process shutdown forever
+  // (hosts typically SIGKILL us a couple of seconds after SIGTERM).
+  let graceTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      proc.exited.then(() => undefined),
+      new Promise<void>((resolve) => {
+        graceTimer = setTimeout(resolve, graceMs);
+      }),
+    ]);
+  } finally {
+    if (graceTimer !== undefined) clearTimeout(graceTimer);
+  }
+
+  if (proc.exitCode !== null) return;
+  killProcessTree(proc);
 }

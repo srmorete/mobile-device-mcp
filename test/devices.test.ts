@@ -370,8 +370,58 @@ describe("detectPlatform", () => {
 
 // --- cleanupDevice ---
 
+/** Android server mock: first group SIGTERM marks it exited. */
+function androidExitingServer(pid: number) {
+  const proc = {
+    pid,
+    exitCode: null as number | null,
+    exited: Promise.resolve(0),
+    kill(_signal?: NodeJS.Signals | number) {
+      this.exitCode = 0;
+    },
+  };
+  return proc;
+}
+
+/** iOS server mock: marks exited when HTTP /shutdown is "accepted". */
+function iosServer(pid: number) {
+  let resolveExit!: (code: number) => void;
+  const exited = new Promise<number>((resolve) => {
+    resolveExit = resolve;
+  });
+  const proc = {
+    pid,
+    exitCode: null as number | null,
+    exited,
+    kill(_signal?: NodeJS.Signals | number) {
+      /* signals still possible as last resort */
+    },
+    /** Simulate xcodebuild exiting after FlyingFox stop. */
+    markExited() {
+      this.exitCode = 0;
+      resolveExit(0);
+    },
+  };
+  return proc;
+}
+
+function mockShutdownFetch(onShutdown: () => void) {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: any, init?: any) => {
+    const url = String(input);
+    if (url.includes("/shutdown") && init?.method === "POST") {
+      onShutdown();
+      return new Response("OK", { status: 200 });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+  return () => {
+    globalThis.fetch = original;
+  };
+}
+
 describe("cleanupDevice", () => {
-  test("kills Android device server and cleans up forwards", async () => {
+  test("stops Android device server gracefully then cleans up forwards", async () => {
     const spawnCalls: string[][] = [];
     const spawn = spyOn(Bun, "spawn").mockImplementation((cmd: any) => {
       const args = cmd as string[];
@@ -381,18 +431,25 @@ describe("cleanupDevice", () => {
       }
       return mockSubprocess("");
     });
-    const killMock = spyOn(process, "kill").mockImplementation(() => true);
+    const proc = androidExitingServer(1234);
+    const killMock = spyOn(process, "kill").mockImplementation((pid: any, signal?: any) => {
+      if (pid === -1234 && (signal === "SIGTERM" || signal === 15)) {
+        proc.exitCode = 0;
+      }
+      return true;
+    });
 
     const dev: RegisteredDevice = {
       id: "test-android",
       platform: "android",
       port: 8080,
       authToken: "tok",
-      serverProcess: { exitCode: null, kill: mock(() => {}), pid: 1234 } as any,
+      serverProcess: proc as any,
     };
     await cleanupDevice(dev);
 
-    expect(killMock).toHaveBeenCalledWith(-1234, "SIGKILL");
+    expect(killMock).toHaveBeenCalledWith(-1234, "SIGTERM");
+    expect(killMock).not.toHaveBeenCalledWith(-1234, "SIGKILL");
     expect(spawnCalls.some((c) => c.join(" ").includes("force-stop"))).toBe(true);
     expect(spawnCalls.some((c) => c.join(" ").includes("--remove") && c.join(" ").includes("tcp:8080"))).toBe(true);
     // Should NOT remove forwards for other devices
@@ -402,54 +459,119 @@ describe("cleanupDevice", () => {
     killMock.mockRestore();
   });
 
-  test("falls back to direct kill when process group kill fails", async () => {
+  test("escalates to SIGKILL when the Android server ignores SIGTERM", async () => {
     const spawn = spyOn(Bun, "spawn").mockImplementation(() => mockSubprocess(""));
-    const killMock = spyOn(process, "kill").mockImplementation(() => {
-      throw new Error("no process group");
+    const signals: Array<NodeJS.Signals | number | undefined> = [];
+    const killMock = spyOn(process, "kill").mockImplementation((_pid: any, signal?: any) => {
+      signals.push(signal);
+      return true;
     });
 
-    const serverKill = mock(() => {});
+    const proc = {
+      pid: 1234,
+      exitCode: null as number | null,
+      exited: new Promise<number>(() => {}),
+      kill: mock(() => {}),
+    };
     const dev: RegisteredDevice = {
-      id: "test-fallback",
+      id: "test-escalate",
       platform: "android",
       port: 8080,
       authToken: "tok",
-      serverProcess: { exitCode: null, kill: serverKill, pid: 1234 } as any,
+      serverProcess: proc as any,
     };
     await cleanupDevice(dev);
-    expect(serverKill).toHaveBeenCalledWith(9);
+    expect(signals[0]).toBe("SIGTERM");
+    expect(signals).toContain("SIGKILL");
 
     spawn.mockRestore();
     killMock.mockRestore();
   });
 
-  test("kills tunnel process for iOS real device", async () => {
+  test("falls back to direct signal when process group signal fails", async () => {
+    const spawn = spyOn(Bun, "spawn").mockImplementation(() => mockSubprocess(""));
+    const killMock = spyOn(process, "kill").mockImplementation(() => {
+      throw new Error("no process group");
+    });
+
+    const serverProc = {
+      pid: 1234,
+      exitCode: null as number | null,
+      exited: Promise.resolve(0),
+      kill(signal?: NodeJS.Signals | number) {
+        if (signal === "SIGTERM" || signal === 15) this.exitCode = 0;
+      },
+    };
+    const serverKill = spyOn(serverProc, "kill");
+    const dev: RegisteredDevice = {
+      id: "test-fallback",
+      platform: "android",
+      port: 8080,
+      authToken: "tok",
+      serverProcess: serverProc as any,
+    };
+    await cleanupDevice(dev);
+    expect(serverKill).toHaveBeenCalledWith("SIGTERM");
+
+    spawn.mockRestore();
+    killMock.mockRestore();
+  });
+
+  test("iOS cleanup POSTs /shutdown and skips SIGTERM when xcodebuild exits", async () => {
     const spawn = spyOn(Bun, "spawn").mockImplementation(() => mockSubprocess(""));
     const killMock = spyOn(process, "kill").mockImplementation(() => true);
+    const proc = iosServer(100);
+    const restoreFetch = mockShutdownFetch(() => proc.markExited());
+
+    const dev: RegisteredDevice = {
+      id: "test-ios-http-shutdown",
+      platform: "ios",
+      port: 22099,
+      authToken: "tok",
+      serverProcess: proc as any,
+    };
+    await cleanupDevice(dev);
+
+    // Clean HTTP path — no process-group signals needed.
+    expect(killMock).not.toHaveBeenCalled();
+    expect(proc.exitCode).toBe(0);
+
+    restoreFetch();
+    spawn.mockRestore();
+    killMock.mockRestore();
+  });
+
+  test("kills tunnel process hard for iOS real device (after graceful server stop)", async () => {
+    const spawn = spyOn(Bun, "spawn").mockImplementation(() => mockSubprocess(""));
+    const killMock = spyOn(process, "kill").mockImplementation(() => true);
+    const proc = iosServer(100);
+    const restoreFetch = mockShutdownFetch(() => proc.markExited());
 
     const dev: RegisteredDevice = {
       id: "test-ios-tunnel",
       platform: "ios",
       port: 22099,
       authToken: "tok",
-      serverProcess: { exitCode: null, kill: mock(() => {}), pid: 100 } as any,
-      tunnelProcess: { exitCode: null, kill: mock(() => {}), pid: 200 } as any,
+      serverProcess: proc as any,
+      tunnelProcess: { exitCode: null, kill: mock(() => {}), pid: 200, exited: Promise.resolve(0) } as any,
     };
     await cleanupDevice(dev);
 
+    expect(killMock).not.toHaveBeenCalledWith(-100, "SIGTERM");
     expect(killMock).toHaveBeenCalledWith(-200, "SIGKILL");
 
+    restoreFetch();
     spawn.mockRestore();
     killMock.mockRestore();
   });
 
   test("tunnel fallback to direct kill", async () => {
     const spawn = spyOn(Bun, "spawn").mockImplementation(() => mockSubprocess(""));
-    let callCount = 0;
-    const killMock = spyOn(process, "kill").mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) return true; // server group kill succeeds
-      throw new Error("no tunnel group"); // tunnel group kill fails
+    const proc = iosServer(100);
+    const restoreFetch = mockShutdownFetch(() => proc.markExited());
+    const killMock = spyOn(process, "kill").mockImplementation((pid: any) => {
+      if (pid === -200) throw new Error("no tunnel group");
+      return true;
     });
 
     const tunnelKill = mock(() => {});
@@ -458,12 +580,14 @@ describe("cleanupDevice", () => {
       platform: "ios",
       port: 22098,
       authToken: "tok",
-      serverProcess: { exitCode: null, kill: mock(() => {}), pid: 100 } as any,
-      tunnelProcess: { exitCode: null, kill: tunnelKill, pid: 200 } as any,
+      serverProcess: proc as any,
+      tunnelProcess: { exitCode: null, kill: tunnelKill, pid: 200, exited: Promise.resolve(0) } as any,
     };
     await cleanupDevice(dev);
-    expect(tunnelKill).toHaveBeenCalledWith(9);
+    // killProcessTree escalates tunnel via handle.kill(SIGKILL)
+    expect(tunnelKill).toHaveBeenCalledWith("SIGKILL");
 
+    restoreFetch();
     spawn.mockRestore();
     killMock.mockRestore();
   });
@@ -476,26 +600,28 @@ describe("cleanupDevice", () => {
 
     const spawn = spyOn(Bun, "spawn").mockImplementation(() => mockSubprocess(""));
     const killMock = spyOn(process, "kill").mockImplementation(() => true);
+    const proc = iosServer(300);
+    const restoreFetch = mockShutdownFetch(() => proc.markExited());
 
     const dev: RegisteredDevice = {
       id: "test-ios-lock",
       platform: "ios",
       port: 22199,
       authToken: "tok",
-      serverProcess: { exitCode: null, kill: mock(() => {}), pid: 300 } as any,
+      serverProcess: proc as any,
     };
     await cleanupDevice(dev);
     expect(existsSync(lockPath)).toBe(false);
 
+    restoreFetch();
     spawn.mockRestore();
     killMock.mockRestore();
   });
 
   test("iOS simulator cleanup deletes lock file without touching the port listener", async () => {
-    // Spec §2.6: iOS cleanup = kill processes + delete lock file. The server
-    // runs as a managed xcodebuild session, so the process-group kill above is
-    // what takes the server down — no lsof-based port kill (that hack existed
-    // only because simctl-spawned servers survived their handle).
+    // Spec §2.6: iOS cleanup = stop managed xcodebuild session + delete lock.
+    // No lsof-based port kill (that hack existed only because simctl-spawned
+    // servers survived their handle).
     const lockDir = join(homedir(), ".mdms", "ports");
     mkdirSync(lockDir, { recursive: true });
     const lockPath = join(lockDir, "22197");
@@ -507,6 +633,8 @@ describe("cleanupDevice", () => {
       return mockSubprocess("");
     });
     const killMock = spyOn(process, "kill").mockImplementation(() => true);
+    const proc = iosServer(300);
+    const restoreFetch = mockShutdownFetch(() => proc.markExited());
 
     const dev: RegisteredDevice = {
       id: "test-ios-sim-cleanup",
@@ -514,34 +642,75 @@ describe("cleanupDevice", () => {
       deviceType: "simulator",
       port: 22197,
       authToken: "tok",
-      serverProcess: { exitCode: null, kill: mock(() => {}), pid: 300 } as any,
+      serverProcess: proc as any,
     };
     await cleanupDevice(dev);
 
     expect(spawnCalls.some((c) => c[0] === "lsof")).toBe(false);
-    // Lock file should be deleted
     expect(existsSync(lockPath)).toBe(false);
+    // Clean HTTP shutdown — no signal cascade
+    expect(killMock).not.toHaveBeenCalled();
 
+    restoreFetch();
     spawn.mockRestore();
     killMock.mockRestore();
   });
 
-  test("skips kill when pid is 0", async () => {
+  test("iOS escalates to SIGTERM when /shutdown fails and process stays up", async () => {
+    const spawn = spyOn(Bun, "spawn").mockImplementation(() => mockSubprocess(""));
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new Error("ECONNREFUSED");
+    }) as typeof fetch;
+
+    const signals: Array<NodeJS.Signals | number | undefined> = [];
+    const killMock = spyOn(process, "kill").mockImplementation((_pid: any, signal?: any) => {
+      signals.push(signal);
+      return true;
+    });
+
+    // Server never exits → wait times out → stopProcessTree escalates.
+    const proc = {
+      pid: 400,
+      exitCode: null as number | null,
+      exited: new Promise<number>(() => {}),
+      kill: mock(() => {}),
+    };
+    const dev: RegisteredDevice = {
+      id: "test-ios-shutdown-fail",
+      platform: "ios",
+      port: 22100,
+      authToken: "tok",
+      serverProcess: proc as any,
+    };
+    await cleanupDevice(dev);
+
+    expect(signals).toContain("SIGTERM");
+    expect(signals).toContain("SIGKILL");
+
+    globalThis.fetch = original;
+    spawn.mockRestore();
+    killMock.mockRestore();
+  }, 15_000);
+
+  test("skips group kill when pid is 0 after clean HTTP shutdown", async () => {
     const spawn = spyOn(Bun, "spawn").mockImplementation(() => mockSubprocess(""));
     const killMock = spyOn(process, "kill").mockImplementation(() => true);
+    const proc = iosServer(0);
+    const restoreFetch = mockShutdownFetch(() => proc.markExited());
 
-    const serverKill = mock(() => {});
     const dev: RegisteredDevice = {
       id: "test-pid-zero",
       platform: "ios",
       port: 22198,
       authToken: "tok",
-      serverProcess: { exitCode: null, kill: serverKill, pid: 0 } as any,
+      serverProcess: proc as any,
     };
     await cleanupDevice(dev);
-    // process.kill should NOT have been called (pid is 0)
     expect(killMock).not.toHaveBeenCalled();
+    expect(proc.exitCode).toBe(0);
 
+    restoreFetch();
     spawn.mockRestore();
     killMock.mockRestore();
   });
@@ -552,14 +721,20 @@ describe("cleanupDevice", () => {
       if (args.includes("forward --list")) throw new Error("adb gone");
       return mockSubprocess("");
     });
-    const killMock = spyOn(process, "kill").mockImplementation(() => true);
+    const proc = androidExitingServer(500);
+    const killMock = spyOn(process, "kill").mockImplementation((pid: any, signal?: any) => {
+      if (pid === -500 && (signal === "SIGTERM" || signal === 15)) {
+        proc.exitCode = 0;
+      }
+      return true;
+    });
 
     const dev: RegisteredDevice = {
       id: "test-fwd-fail",
       platform: "android",
       port: 8080,
       authToken: "tok",
-      serverProcess: { exitCode: null, kill: mock(() => {}), pid: 500 } as any,
+      serverProcess: proc as any,
     };
     // Should not throw
     await cleanupDevice(dev);
